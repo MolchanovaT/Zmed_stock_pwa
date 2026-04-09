@@ -1,0 +1,22 @@
+aiogram==3.3.0
+aiohttp==3.9.3
+python-dotenv==1.0.1
+pandas==2.2.1
+openpyxl>=3.1
+SQLAlchemy==2.0.29
+asyncpg==0.29.0
+alembic==1.13.1
+apscheduler==3.10.4
+psycopg2-binary==2.9.9    # нужен только для Postgres
+aiosqlite==0.19.0         # нужен только для SQLite
+flask>=2.3,<3.0
+flask-login>=0.6
+werkzeug>=2.3
+reportlab>=3.6
+pyzipper
+# FastAPI / PWA backend
+fastapi>=0.111
+uvicorn[standard]>=0.29
+python-jose[cryptography]>=3.3
+passlib[bcrypt]>=1.7
+python-multipart>=0.0.9

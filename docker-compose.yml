@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  bot_implants:
+    build: .
+    container_name: stockbot2_implants_trash_bot
+    ports:
+      - "5102:5102"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    env_file: .env
+    restart: always
+
+  scheduler_implants:
+    build: .
+    container_name: stockbot2_implants_trash_scheduler
+    command: python -m scheduler
+    volumes:
+      - ./data:/app/data
+    env_file: .env
+    restart: always
+
+  api_implants:
+    build: .
+    container_name: stockbot2_implants_api
+    command: uvicorn app.api_main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./frontend/dist:/app/frontend/dist   # собранный фронтенд
+    env_file: .env
+    restart: always

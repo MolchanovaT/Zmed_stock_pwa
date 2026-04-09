@@ -1,0 +1,31 @@
+# Секреты
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Данные и база
+data/
+migrations/
+uploads/
+
+# Логи
+*.log
+
+# CSV-отчёты планировщика
+*.csv
+
+# IDE
+.idea/
+.vscode/
+
+# Node
+frontend/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
