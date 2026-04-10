@@ -142,17 +142,16 @@ export default function CartPage() {
             <div className="space-y-3 mb-6">
               {Object.values(
                 cart.items.reduce((acc, item) => {
-                  const key = `${item.article}__${item.nomenclature}`
-                  if (!acc[key]) acc[key] = { article: item.article, nomenclature: item.nomenclature, items: [] }
+                  const key = item.nomenclature
+                  if (!acc[key]) acc[key] = { nomenclature: item.nomenclature, items: [] }
                   acc[key].items.push(item)
                   return acc
                 }, {})
               ).map((group) => (
-                <div key={`${group.article}__${group.nomenclature}`}
+                <div key={group.nomenclature}
                      className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
                   {/* Заголовок группы */}
                   <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
-                    <p className="font-mono text-xs text-gray-400">{group.article || '—'}</p>
                     <p className="text-sm font-semibold text-gray-800 leading-snug">{group.nomenclature}</p>
                   </div>
                   {/* Строки характеристик */}

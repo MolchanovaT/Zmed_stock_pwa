@@ -26,16 +26,18 @@ export default function CartItem({ item, onUpdate, onDelete, compact = false }) 
       {/* Информация о позиции */}
       <div className="flex-1 min-w-0">
         {!compact && (
-          <>
-            <p className="font-mono text-xs text-gray-400">{item.article || '—'}</p>
-            <p className="text-sm font-medium text-gray-800 leading-snug truncate">
-              {item.nomenclature}
-            </p>
-          </>
+          <p className="text-sm font-medium text-gray-800 leading-snug truncate">
+            {item.nomenclature}
+          </p>
         )}
-        <p className={`truncate ${compact ? 'text-sm text-gray-700' : 'text-xs text-gray-500'}`}>
-          {item.characteristic || '—'}
-        </p>
+        <div className="flex gap-2 items-baseline flex-wrap">
+          {item.article && (
+            <span className="font-mono text-xs text-gray-400">{item.article}</span>
+          )}
+          <span className={`truncate ${compact ? 'text-sm text-gray-700' : 'text-xs text-gray-500'}`}>
+            {item.characteristic || '—'}
+          </span>
+        </div>
         <p className="text-xs text-gray-400 mt-0.5">
           На складе: {Math.round(item.available_balance)} шт.
         </p>
