@@ -118,6 +118,12 @@ export default function SearchPage() {
         </div>
         <div className="flex items-center gap-3 text-sm">
           <button
+            onClick={() => navigate('/orders')}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            📋 Заказы
+          </button>
+          <button
             onClick={() => navigate('/cart')}
             className="relative bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
           >

@@ -74,6 +74,12 @@ export default function CartPage() {
           <h1 className="font-bold text-lg">Корзина</h1>
         </div>
         <div className="flex items-center gap-3 text-sm">
+          <button
+            onClick={() => navigate('/orders')}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            📋 Заказы
+          </button>
           <span className="text-white/70 hidden md:inline">{user?.username}</span>
           <button onClick={signout} className="text-white/70 hover:text-white">
             Выйти

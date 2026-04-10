@@ -208,6 +208,28 @@ async def clear_cart(current_user: AdminUser = Depends(get_current_user)):
         await s.commit()
 
 
+@router.get("/orders")
+async def get_orders(current_user: AdminUser = Depends(get_current_user)):
+    """Возвращает все оформленные заказы текущего пользователя (status=submitted)."""
+    async with AsyncSessionLocal() as s:
+        carts_res = await s.execute(
+            select(Cart)
+            .where(Cart.tg_user_id == current_user.id, Cart.status == "submitted")
+            .order_by(Cart.created_at.desc())
+        )
+        carts = list(carts_res.scalars().all())
+
+        orders = []
+        for cart in carts:
+            items_res = await s.execute(
+                select(CartItem).where(CartItem.cart_id == cart.id).order_by(CartItem.id)
+            )
+            items = list(items_res.scalars().all())
+            orders.append(_serialize_cart(cart, items))
+
+    return {"orders": orders}
+
+
 @router.post("/order")
 async def place_order(
     body: OrderIn,

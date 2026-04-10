@@ -27,6 +27,10 @@ export const deleteItem = (itemId) =>
 export const clearCart = () =>
   client.delete('/cart')
 
+/** Список всех оформленных заказов текущего пользователя. */
+export const getOrders = () =>
+  client.get('/cart/orders').then((r) => r.data.orders)
+
 /**
  * Оформить заказ.
  * @param {{ delivery_date, delivery_time, doctor, instrument }} order
