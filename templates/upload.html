@@ -67,15 +67,19 @@
     </tbody>
 </table>
 
-<form class="row g-2" action="{{ url_for('user_add') }}" method="post">
-    <div class="col-auto">
-        <input class="form-control" type="text" name="username" placeholder="Логин" required>
-    </div>
-    <div class="col-auto">
-        <input class="form-control" type="password" name="password" placeholder="Пароль" required>
-    </div>
-    <div class="col-auto">
-        <button class="btn btn-success">Добавить</button>
+<form action="{{ url_for('user_add') }}" method="post">
+    <div class="row g-2 align-items-start">
+        <div class="col-auto">
+            <input class="form-control" type="text" name="username" placeholder="Логин"
+                   pattern="[a-zA-Z0-9_\-]+" required>
+            <div class="form-text">Латинские буквы, цифры, _ и -</div>
+        </div>
+        <div class="col-auto">
+            <input class="form-control" type="password" name="password" placeholder="Пароль" required>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-success">Добавить</button>
+        </div>
     </div>
 </form>
 
