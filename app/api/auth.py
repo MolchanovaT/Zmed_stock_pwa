@@ -10,6 +10,7 @@ JWT-авторизация для PWA.
   GET  /api/auth/me     — возвращает данные текущего пользователя
 """
 
+import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import Optional
@@ -20,6 +21,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.api.activity import log_activity
 from app.db.models import AdminUser
 from app.db.session import AsyncSessionLocal
 
@@ -97,6 +99,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
         )
 
     token = create_access_token(user.id)
+    asyncio.create_task(log_activity(user.id, user.username, "login"))
     return {"access_token": token, "token_type": "bearer"}
 
 

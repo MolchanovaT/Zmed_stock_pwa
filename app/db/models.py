@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Numeric, BigInteger, ForeignKey
+from sqlalchemy import Column, Integer, String, Numeric, BigInteger, ForeignKey, Text
 
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -76,3 +76,15 @@ class CartItem(Base):
     characteristic = Column(String)
     quantity = Column(Integer, default=1)
     available_balance = Column(Numeric)
+
+
+class PwaActivity(Base):
+    __tablename__ = "pwa_activity"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
+    username = Column(String, nullable=True)
+    action = Column(String(32), nullable=False)   # login|search|pdf_export|add_to_cart|place_order|clear_cart
+    detail = Column(Text, nullable=True)           # JSON с подробностями
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))

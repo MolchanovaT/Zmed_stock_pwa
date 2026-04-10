@@ -17,6 +17,7 @@ PDF генерируется той же логикой, что и в handlers.d
   GET /api/stock/export-pdf
 """
 
+import asyncio
 import io
 import os
 import tempfile
@@ -34,6 +35,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from sqlalchemy import select, func
 
+from app.api.activity import log_activity
 from app.api.auth import get_current_user
 from app.bot.handlers import uniq, FILTER_MAP   # переиспользуем готовую логику
 from app.db.models import AdminUser, Stock
@@ -207,7 +209,7 @@ async def search_stock(
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    _: AdminUser = Depends(get_current_user),
+    current_user: AdminUser = Depends(get_current_user),
 ):
     """
     Поиск остатков с пагинацией.
@@ -252,6 +254,12 @@ async def search_stock(
         for row in chunk
     ]
 
+    asyncio.create_task(log_activity(
+        current_user.id, current_user.username, "search",
+        {"search": search, "group": group, "region": region, "warehouse": warehouse,
+         "category": category, "manufacturer": manufacturer, "brand": brand,
+         "nom_type": nom_type, "results": total},
+    ))
     return {
         "items": items,
         "total": total,
@@ -273,7 +281,7 @@ async def export_pdf(
     brand: Optional[str] = Query(None),
     nom_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    current_user: AdminUser = Depends(get_current_user),
 ):
     """
     Генерирует PDF с результатами поиска и возвращает файл для скачивания.
@@ -349,6 +357,11 @@ async def export_pdf(
     doc.build(elems)
     buf.seek(0)
 
+    asyncio.create_task(log_activity(
+        current_user.id, current_user.username, "pdf_export",
+        {"search": search, "group": group, "region": region, "warehouse": warehouse,
+         "category": category, "manufacturer": manufacturer, "brand": brand, "nom_type": nom_type},
+    ))
     return StreamingResponse(
         buf,
         media_type="application/pdf",

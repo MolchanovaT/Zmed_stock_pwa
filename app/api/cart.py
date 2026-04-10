@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, delete
 
+from app.api.activity import log_activity
 from app.api.auth import get_current_user
 from app.bot.handlers import send_order_notification  # переиспользуем логику email
 from app.db.models import AdminUser, Cart, CartItem
@@ -141,6 +142,11 @@ async def add_cart_item(
         )
         items = list(items_res.scalars().all())
 
+    asyncio.create_task(log_activity(
+        current_user.id, current_user.username, "add_to_cart",
+        {"article": body.article, "nomenclature": body.nomenclature,
+         "characteristic": body.characteristic, "quantity": body.quantity},
+    ))
     return {"cart": _serialize_cart(cart, items)}
 
 
@@ -260,6 +266,10 @@ async def place_order(
         instrument=body.instrument,
     ))
 
+    asyncio.create_task(log_activity(
+        current_user.id, current_user.username, "place_order",
+        {"order_id": cart_id_val, "lpu": cart_lpu, "items_count": len(items_snapshot)},
+    ))
     return {
         "order_id": cart_id_val,
         "status": "submitted",
