@@ -56,6 +56,7 @@ export default function CartPage() {
       const result = await placeOrder(formData)
       setOrderDone(result)
       setCart(null)
+      sessionStorage.removeItem('cart_region')
     } catch (err) {
       setError(err.response?.data?.detail || 'Ошибка оформления заказа')
     } finally {
@@ -186,7 +187,12 @@ export default function CartPage() {
             {/* Форма оформления */}
             {cart.items.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-                <OrderForm onSubmit={handlePlaceOrder} submitting={submitting} />
+                <OrderForm
+                  onSubmit={handlePlaceOrder}
+                  submitting={submitting}
+                  initialLpu={cart.lpu || ''}
+                  regionContext={sessionStorage.getItem('cart_region') || ''}
+                />
               </div>
             )}
           </>

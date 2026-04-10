@@ -15,12 +15,12 @@ function toRuDate(isoDate) {
  *   onSubmit({ lpu, delivery_date, delivery_time, doctor, instrument }) — callback
  *   submitting — boolean, блокирует форму во время отправки
  */
-export default function OrderForm({ onSubmit, submitting }) {
+export default function OrderForm({ onSubmit, submitting, initialLpu = '', regionContext = '' }) {
   const [form, setForm] = useState({
     lpu: '',
     lpu_manual: '',
-    delivery_date: '',   // хранится в формате YYYY-MM-DD (нативный <input type="date">)
-    delivery_time: '',   // хранится в формате HH:MM (нативный <input type="time">)
+    delivery_date: '',
+    delivery_time: '',
     doctor: '',
     instrument: 'нет',
   })
@@ -29,10 +29,17 @@ export default function OrderForm({ onSubmit, submitting }) {
   const [lpuLoading, setLpuLoading] = useState(true)
 
   useEffect(() => {
-    getLpuList()
-      .then((items) => setLpuList(items))
-      .finally(() => setLpuLoading(false))
-  }, [])
+    getLpuList().then((items) => {
+      setLpuList(items)
+      if (initialLpu) {
+        if (items.includes(initialLpu)) {
+          setForm((f) => ({ ...f, lpu: initialLpu }))
+        } else {
+          setForm((f) => ({ ...f, lpu: '__manual__', lpu_manual: initialLpu }))
+        }
+      }
+    }).finally(() => setLpuLoading(false))
+  }, [initialLpu])
 
   const isManual = form.lpu === '__manual__'
   const effectiveLpu = isManual ? form.lpu_manual.trim() : form.lpu
@@ -78,10 +85,17 @@ export default function OrderForm({ onSubmit, submitting }) {
         Оформление заказа
       </h3>
 
+      {/* Контекст региона — если склад не был выбран конкретно */}
+      {regionContext && !initialLpu && (
+        <div className="bg-blue-50 border border-blue-100 rounded-md px-3 py-2 text-xs text-blue-700">
+          Регион поиска: <span className="font-semibold">{regionContext}</span> — уточните ЛПУ ниже
+        </div>
+      )}
+
       {/* ЛПУ — выпадающий список */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
-          ЛПУ
+          ЛПУ{initialLpu && <span className="ml-1 normal-case font-normal text-green-600">(подставлено из фильтра)</span>}
         </label>
         <select
           value={form.lpu}

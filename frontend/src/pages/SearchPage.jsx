@@ -71,13 +71,20 @@ export default function SearchPage() {
   // ── Добавить в корзину ──────────────────────────────────────────────────────
   const handleAddToCart = async (item) => {
     try {
+      const warehouse = filters.warehouse && filters.warehouse !== 'все' ? filters.warehouse : ''
+      // Сохраняем регион как контекст для формы заказа
+      if (filters.region && filters.region !== 'все') {
+        sessionStorage.setItem('cart_region', filters.region)
+      } else {
+        sessionStorage.removeItem('cart_region')
+      }
       await addItem({
         article: item.article,
         nomenclature: item.nomenclature,
         characteristic: item.characteristic,
         quantity: 1,
         available_balance: item.balance,
-        lpu: '',
+        lpu: warehouse,
       })
       setCartCount((n) => n + 1)
       showToast(`✅ Добавлено: ${item.nomenclature.slice(0, 30)}...`)
