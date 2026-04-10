@@ -9,6 +9,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./data:/app/data
+      - ./templates:/app/templates
+      - ./admin_app.py:/app/admin_app.py
     env_file: .env
     restart: always
 
