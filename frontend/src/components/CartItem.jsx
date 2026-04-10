@@ -8,7 +8,7 @@ import { updateItem, deleteItem } from '../api/cart'
  *   onUpdate(id, newQty) — callback после изменения количества
  *   onDelete(id)         — callback после удаления
  */
-export default function CartItem({ item, onUpdate, onDelete }) {
+export default function CartItem({ item, onUpdate, onDelete, compact = false }) {
   const handleQty = async (delta) => {
     const newQty = item.quantity + delta
     if (newQty < 1) return
@@ -22,16 +22,20 @@ export default function CartItem({ item, onUpdate, onDelete }) {
   }
 
   return (
-    <div className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-100 shadow-sm">
+    <div className="flex items-center gap-3 px-3 py-2">
       {/* Информация о позиции */}
       <div className="flex-1 min-w-0">
-        <p className="font-mono text-xs text-gray-400">{item.article || '—'}</p>
-        <p className="text-sm font-medium text-gray-800 leading-snug truncate">
-          {item.nomenclature}
-        </p>
-        {item.characteristic && (
-          <p className="text-xs text-gray-500 truncate">{item.characteristic}</p>
+        {!compact && (
+          <>
+            <p className="font-mono text-xs text-gray-400">{item.article || '—'}</p>
+            <p className="text-sm font-medium text-gray-800 leading-snug truncate">
+              {item.nomenclature}
+            </p>
+          </>
         )}
+        <p className={`truncate ${compact ? 'text-sm text-gray-700' : 'text-xs text-gray-500'}`}>
+          {item.characteristic || '—'}
+        </p>
         <p className="text-xs text-gray-400 mt-0.5">
           На складе: {Math.round(item.available_balance)} шт.
         </p>

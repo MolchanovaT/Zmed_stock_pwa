@@ -138,15 +138,36 @@ export default function CartPage() {
               </button>
             </div>
 
-            {/* Список позиций */}
-            <div className="space-y-2 mb-6">
-              {cart.items.map((item) => (
-                <CartItem
-                  key={item.id}
-                  item={item}
-                  onUpdate={handleItemUpdate}
-                  onDelete={handleItemDelete}
-                />
+            {/* Список позиций, сгруппированных по номенклатуре */}
+            <div className="space-y-3 mb-6">
+              {Object.values(
+                cart.items.reduce((acc, item) => {
+                  const key = `${item.article}__${item.nomenclature}`
+                  if (!acc[key]) acc[key] = { article: item.article, nomenclature: item.nomenclature, items: [] }
+                  acc[key].items.push(item)
+                  return acc
+                }, {})
+              ).map((group) => (
+                <div key={`${group.article}__${group.nomenclature}`}
+                     className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
+                  {/* Заголовок группы */}
+                  <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+                    <p className="font-mono text-xs text-gray-400">{group.article || '—'}</p>
+                    <p className="text-sm font-semibold text-gray-800 leading-snug">{group.nomenclature}</p>
+                  </div>
+                  {/* Строки характеристик */}
+                  <div className="divide-y divide-gray-50">
+                    {group.items.map((item) => (
+                      <CartItem
+                        key={item.id}
+                        item={item}
+                        compact
+                        onUpdate={handleItemUpdate}
+                        onDelete={handleItemDelete}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
 
