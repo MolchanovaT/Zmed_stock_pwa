@@ -1,18 +1,20 @@
+import json
 import os
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, render_template, request, redirect, flash, url_for
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from dotenv import load_dotenv
+from sqlalchemy import func
 
 from app.db.base import Base
 from app.db.session import db_session
 from app.tools.import_csv import load_file
 from app.tools.zip_helper import extract_zip
-from datetime import datetime
 
-from app.db.models import AdminUser
+from app.db.models import AdminUser, PwaActivity
 
 # ─────────────────────────────
 load_dotenv()
@@ -169,6 +171,111 @@ def user_del(user_id: int):
     else:
         flash("Пользователь не найден.", "error")
     return redirect(url_for("upload_file"))
+
+
+ACTION_LABELS = {
+    "login":       "Вход",
+    "search":      "Поиск",
+    "pdf_export":  "Экспорт PDF",
+    "add_to_cart": "В корзину",
+    "place_order": "Заказ",
+}
+
+ACTION_COLORS = {
+    "login":       "primary",
+    "search":      "success",
+    "pdf_export":  "warning",
+    "add_to_cart": "info",
+    "place_order": "danger",
+}
+
+
+def _format_detail(action: str, detail: dict) -> str:
+    if not detail:
+        return "—"
+    if action == "search":
+        parts = []
+        if detail.get("search"):
+            parts.append(f"«{detail['search']}»")
+        filters = [v for k, v in detail.items()
+                   if k not in ("search", "results") and v and v != "все"]
+        if filters:
+            parts.append(f"фильтры: {', '.join(str(f) for f in filters)}")
+        if "results" in detail:
+            parts.append(f"найдено: {detail['results']}")
+        return " | ".join(parts) if parts else "—"
+    if action == "pdf_export":
+        filters = [v for k, v in detail.items() if v and v != "все"]
+        return ", ".join(str(f) for f in filters) if filters else "всё"
+    if action == "add_to_cart":
+        nom = detail.get("nomenclature", "")
+        char = detail.get("characteristic", "")
+        qty = detail.get("quantity", "")
+        return f"{nom[:50]} {char[:20]} × {qty}".strip()
+    if action == "place_order":
+        return f"Заказ #{detail.get('order_id')} | ЛПУ: {detail.get('lpu')} | {detail.get('items_count')} поз."
+    return "—"
+
+
+@app.route("/stats")
+@login_required
+def stats():
+    date_from_str = request.args.get("date_from", "")
+    date_to_str   = request.args.get("date_to", "")
+    user_id       = request.args.get("user_id", type=int)
+    action_filter = request.args.get("action", "")
+
+    q = db_session.query(PwaActivity).order_by(PwaActivity.created_at.desc())
+
+    if date_from_str:
+        q = q.filter(PwaActivity.created_at >= datetime.strptime(date_from_str, "%Y-%m-%d"))
+    if date_to_str:
+        q = q.filter(PwaActivity.created_at < datetime.strptime(date_to_str, "%Y-%m-%d") + timedelta(days=1))
+    if user_id:
+        q = q.filter(PwaActivity.user_id == user_id)
+    if action_filter:
+        q = q.filter(PwaActivity.action == action_filter)
+
+    activities_raw = q.limit(1000).all()
+
+    activities = []
+    for a in activities_raw:
+        detail = json.loads(a.detail) if a.detail else {}
+        activities.append({
+            "id":         a.id,
+            "username":   a.username or "—",
+            "action":     a.action,
+            "label":      ACTION_LABELS.get(a.action, a.action),
+            "color":      ACTION_COLORS.get(a.action, "secondary"),
+            "detail":     _format_detail(a.action, detail),
+            "created_at": a.created_at,
+        })
+
+    # Суммарная статистика за сегодня
+    today = datetime.utcnow().date()
+    today_rows = (
+        db_session.query(PwaActivity.action, func.count(PwaActivity.id))
+        .filter(PwaActivity.created_at >= today)
+        .group_by(PwaActivity.action)
+        .all()
+    )
+    today_stats = {row[0]: row[1] for row in today_rows}
+
+    users = db_session.query(AdminUser).order_by(AdminUser.username).all()
+
+    return render_template(
+        "stats.html",
+        activities=activities,
+        users=users,
+        today_stats=today_stats,
+        action_labels=ACTION_LABELS,
+        filters={
+            "date_from": date_from_str,
+            "date_to":   date_to_str,
+            "user_id":   user_id,
+            "action":    action_filter,
+        },
+    )
 
 
 if __name__ == "__main__":
