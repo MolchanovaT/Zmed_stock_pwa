@@ -29,9 +29,9 @@ export const getNomTypes = (group, region, warehouse, category, manufacturer, br
     .get('/stock/nom-types', { params: { group, region, warehouse, category, manufacturer, brand } })
     .then((r) => r.data.items)
 
-/** Список всех складов (для выбора ЛПУ при оформлении заказа). */
-export const getLpuList = () =>
-  client.get('/stock/warehouses').then((r) => r.data.items)
+/** Список складов для выбора ЛПУ при оформлении заказа. Фильтруется по региону если передан. */
+export const getLpuList = (region = '') =>
+  client.get('/stock/warehouses', { params: region ? { region } : {} }).then((r) => r.data.items)
 
 // ── Поиск ─────────────────────────────────────────────────────────────────────
 

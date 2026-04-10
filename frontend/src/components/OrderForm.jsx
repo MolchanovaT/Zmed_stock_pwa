@@ -29,7 +29,7 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
   const [lpuLoading, setLpuLoading] = useState(true)
 
   useEffect(() => {
-    getLpuList().then((items) => {
+    getLpuList(regionContext).then((items) => {
       setLpuList(items)
       if (initialLpu) {
         if (items.includes(initialLpu)) {
@@ -39,7 +39,7 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
         }
       }
     }).finally(() => setLpuLoading(false))
-  }, [initialLpu])
+  }, [initialLpu, regionContext])
 
   const isManual = form.lpu === '__manual__'
   const effectiveLpu = isManual ? form.lpu_manual.trim() : form.lpu
