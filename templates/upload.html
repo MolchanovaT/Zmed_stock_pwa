@@ -39,42 +39,40 @@
 
 <hr>
 
-<h4>👥 Разрешённые UID Telegram</h4>
+<h4>👥 Пользователи PWA</h4>
 
 <table class="table table-sm table-striped align-middle">
     <thead>
     <tr>
-        <th>UID</th>
-        <th>Имя</th>
+        <th>Логин</th>
         <th></th>
     </tr>
     </thead>
     <tbody>
-    {% for u in users %}
+    {% for u in pwa_users %}
     <tr>
-        <td>{{ u.tg_id }}</td>
-        <td>{{ u.title or '' }}</td>
+        <td>{{ u.username }}</td>
         <td style="width:1%">
-            <form action="{{ url_for('uid_del', tg_id=u.tg_id) }}" method="post"
-                  onsubmit="return confirm('Удалить UID {{ u.tg_id }}?');">
+            <form action="{{ url_for('user_del', user_id=u.id) }}" method="post"
+                  onsubmit="return confirm('Удалить пользователя {{ u.username }}?');">
                 <button class="btn btn-danger btn-sm">🗑</button>
             </form>
         </td>
     </tr>
     {% else %}
     <tr>
-        <td colspan="3"><em>Список пуст</em></td>
+        <td colspan="2"><em>Список пуст</em></td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
 
-<form class="row g-2" action="{{ url_for('uid_add') }}" method="post">
+<form class="row g-2" action="{{ url_for('user_add') }}" method="post">
     <div class="col-auto">
-        <input class="form-control" type="number" name="tg_id" placeholder="UID" required>
+        <input class="form-control" type="text" name="username" placeholder="Логин" required>
     </div>
     <div class="col-auto">
-        <input class="form-control" type="text" name="title" placeholder="Имя (необязательно)">
+        <input class="form-control" type="password" name="password" placeholder="Пароль" required>
     </div>
     <div class="col-auto">
         <button class="btn btn-success">Добавить</button>

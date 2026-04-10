@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 from flask import Flask, render_template, request, redirect, flash, url_for
-from flask_login import LoginManager, login_user, login_required, logout_user
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from dotenv import load_dotenv
 
 from app.db.base import Base
@@ -12,7 +12,7 @@ from app.tools.import_csv import load_file
 from app.tools.zip_helper import extract_zip
 from datetime import datetime
 
-from app.db.models import AdminUser, AllowedUser
+from app.db.models import AdminUser
 
 # ─────────────────────────────
 load_dotenv()
@@ -110,11 +110,8 @@ def upload_file():
 
         return redirect("/")
 
-    users = db_session.query(AllowedUser).order_by(AllowedUser.tg_id).all()
-    return render_template(
-        "upload.html",
-        users=users
-    )
+    pwa_users = db_session.query(AdminUser).order_by(AdminUser.username).all()
+    return render_template("upload.html", pwa_users=pwa_users)
 
 
 # ─────────────────────────────
@@ -125,44 +122,52 @@ def create_admin_user():
     Base.metadata.create_all(bind=db_session.bind)
 
     if not db_session.query(AdminUser).filter_by(username=username).first():
-        user = AdminUser(username=username)  # ← ОБЯЗАТЕЛЬНО
+        user = AdminUser(username=username)
         user.set_password(password)
         db_session.add(user)
         db_session.commit()
 
 
-@app.post("/uid/add")
+@app.post("/user/add")
 @login_required
-def uid_add():
-    tg_id = request.form.get("tg_id", type=int)
-    title = request.form.get("title", "").strip() or None
+def user_add():
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "").strip()
 
-    if not tg_id:
-        flash("UID не указан.", "error")
+    if not username or not password:
+        flash("Логин и пароль обязательны.", "error")
         return redirect(url_for("upload_file"))
 
-    if db_session.query(AllowedUser).filter_by(tg_id=tg_id).first():
-        flash(f"UID {tg_id} уже есть.", "warning")
+    if not re.fullmatch(r'[a-zA-Z0-9_\-]+', username):
+        flash("Логин: только латинские буквы, цифры, _ и -", "error")
         return redirect(url_for("upload_file"))
 
-    db_session.add(AllowedUser(tg_id=tg_id, title=title))
+    if db_session.query(AdminUser).filter_by(username=username).first():
+        flash(f"Пользователь «{username}» уже существует.", "warning")
+        return redirect(url_for("upload_file"))
+
+    u = AdminUser(username=username)
+    u.set_password(password)
+    db_session.add(u)
     db_session.commit()
-    flash(f"✅ UID {tg_id} добавлен.", "success")
+    flash(f"✅ Пользователь «{username}» добавлен.", "success")
     return redirect(url_for("upload_file"))
 
 
-# --- удалить UID -----------------------------------------------------
-# --- удалить UID -----------------------------------------------------
-@app.post("/uid/del/<int:tg_id>")
+@app.post("/user/del/<int:user_id>")
 @login_required
-def uid_del(tg_id: int):
-    u = db_session.query(AllowedUser).filter_by(tg_id=tg_id).first()
+def user_del(user_id: int):
+    if current_user.id == user_id:
+        flash("Нельзя удалить самого себя.", "error")
+        return redirect(url_for("upload_file"))
+
+    u = db_session.get(AdminUser, user_id)
     if u:
         db_session.delete(u)
         db_session.commit()
-        flash(f"🗑 UID {tg_id} удалён.", "success")
+        flash(f"🗑 Пользователь «{u.username}» удалён.", "success")
     else:
-        flash("UID не найден.", "error")
+        flash("Пользователь не найден.", "error")
     return redirect(url_for("upload_file"))
 
 
