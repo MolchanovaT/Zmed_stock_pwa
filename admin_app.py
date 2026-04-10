@@ -102,13 +102,13 @@ def upload_file():
                 file_dt = datetime.fromtimestamp(filepath.stat().st_mtime)
 
         try:
-            # rows = load_file(filepath, replace=True, file_dt=file_dt)
-            rows = load_file(filepath,
-                             src=src,
-                             file_dt=file_dt)
+            rows = load_file(filepath, src=src, file_dt=file_dt)
             flash(f"✅ Импортировано строк: {rows}", "success")
         except Exception as e:
             flash(f"❌ Ошибка: {e}", "error")
+        finally:
+            # Удаляем загруженный файл после импорта
+            filepath.unlink(missing_ok=True)
 
         return redirect("/")
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import FilterPanel from '../components/FilterPanel'
@@ -56,11 +56,13 @@ export default function SearchPage() {
     doSearch(newFilters, 1, search)
   }, [doSearch, search])
 
+  const searchTimer = React.useRef(null)
   const handleSearchInput = (e) => {
     const val = e.target.value
     setSearch(val)
     setPage(1)
-    doSearch(filters, 1, val)
+    clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => doSearch(filters, 1, val), 500)
   }
 
   const handlePageChange = (p) => {

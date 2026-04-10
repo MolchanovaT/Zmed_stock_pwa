@@ -5,7 +5,7 @@ import asyncio
 import os
 import re
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -166,6 +166,30 @@ async def process_folder(pub_url: str, src: str) -> None:
                 p.unlink(missing_ok=True)
 
 
+TG_INTERACTIONS_RETAIN_DAYS = int(os.getenv("TG_INTERACTIONS_RETAIN_DAYS", "180"))
+
+
+async def cleanup_old_interactions() -> None:
+    """Удаляет записи tg_interactions старше TG_INTERACTIONS_RETAIN_DAYS дней."""
+    from datetime import timezone
+    from sqlalchemy import text as sa_text
+    from app.db.session import AsyncSessionLocal
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=TG_INTERACTIONS_RETAIN_DAYS)
+    try:
+        async with AsyncSessionLocal() as s:
+            result = await s.execute(
+                sa_text("DELETE FROM tg_interactions WHERE created_at < :cutoff"),
+                {"cutoff": cutoff},
+            )
+            await s.commit()
+            deleted = result.rowcount
+        if deleted:
+            _print(f"🧹 tg_interactions: удалено {deleted} записей старше {TG_INTERACTIONS_RETAIN_DAYS} дней")
+    except Exception as exc:
+        _print(f"❌ cleanup_old_interactions: {exc}")
+
+
 # ──────────── запуск планировщика ────────────────────────────
 def main() -> None:
     loop = asyncio.new_event_loop()
@@ -182,6 +206,8 @@ def main() -> None:
     sched.add_job(process_folder, "interval",
                   args=[YD_REMOTE_FOLDER, "remote"],
                   minutes=CRON_REMOTE)
+    # Чистка старых взаимодействий — раз в сутки в 03:00
+    sched.add_job(cleanup_old_interactions, "cron", hour=3, minute=0)
     sched.start()
 
     _print(f"🕒 Планировщик запущен — main:{CRON_MAIN} мин, remote:{CRON_REMOTE} мин.")
