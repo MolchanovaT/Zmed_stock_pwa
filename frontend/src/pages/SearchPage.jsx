@@ -4,7 +4,7 @@ import { useAuth } from '../store/auth'
 import FilterPanel from '../components/FilterPanel'
 import StockTable from '../components/StockTable'
 import { searchStock, exportPdf } from '../api/stock'
-import { addItem } from '../api/cart'
+import { addItem, getCart } from '../api/cart'
 
 export default function SearchPage() {
   const { user, signout } = useAuth()
@@ -18,6 +18,11 @@ export default function SearchPage() {
   const [pdfLoading, setPdfLoading] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)  // мобильный сайдбар
   const [toast, setToast] = useState('')
+  const [cartCount, setCartCount] = useState(0)
+
+  useEffect(() => {
+    getCart().then((cart) => setCartCount(cart?.items?.length ?? 0)).catch(() => {})
+  }, [])
 
   // ── Выполняем поиск при изменении фильтров/страницы ────────────────────────
   const doSearch = useCallback(
@@ -74,6 +79,7 @@ export default function SearchPage() {
         available_balance: item.balance,
         lpu: '',
       })
+      setCartCount((n) => n + 1)
       showToast(`✅ Добавлено: ${item.nomenclature.slice(0, 30)}...`)
     } catch {
       showToast('❌ Ошибка добавления в корзину')
@@ -113,9 +119,16 @@ export default function SearchPage() {
         <div className="flex items-center gap-3 text-sm">
           <button
             onClick={() => navigate('/cart')}
-            className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
+            className="relative bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
           >
             🛒 Корзина
+            {cartCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs
+                               font-bold rounded-full min-w-[18px] h-[18px] flex items-center
+                               justify-center px-1 leading-none">
+                {cartCount}
+              </span>
+            )}
           </button>
           <span className="hidden md:inline text-white/70">{user?.username}</span>
           <button
