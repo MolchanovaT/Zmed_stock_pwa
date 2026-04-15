@@ -247,23 +247,31 @@ async def export_pdf(
     manufacturer: Optional[str] = Query(None),
     brand: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    detail: bool = Query(True),
     current_user: AdminUser = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
-        stmt = (
-            select(
-                Supplies.region,
-                Supplies.warehouse,
-                Supplies.nomenclature,
-                Supplies.characteristic,
-                Supplies.photo_url,
-                func.sum(Supplies.balance).label("bal"),
+        if detail:
+            stmt = (
+                select(
+                    Supplies.region, Supplies.warehouse,
+                    Supplies.nomenclature, Supplies.characteristic, Supplies.photo_url,
+                    func.sum(Supplies.balance).label("bal"),
+                )
+                .group_by(
+                    Supplies.region, Supplies.warehouse,
+                    Supplies.nomenclature, Supplies.characteristic, Supplies.photo_url,
+                )
             )
-            .group_by(
-                Supplies.region, Supplies.warehouse,
-                Supplies.nomenclature, Supplies.characteristic, Supplies.photo_url,
+        else:
+            stmt = (
+                select(
+                    Supplies.region, Supplies.warehouse,
+                    Supplies.nomenclature,
+                    func.sum(Supplies.balance).label("bal"),
+                )
+                .group_by(Supplies.region, Supplies.warehouse, Supplies.nomenclature)
             )
-        )
         stmt = _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, search)
         rows = (await s.execute(stmt)).all()
 
@@ -284,17 +292,14 @@ async def export_pdf(
     styles = getSampleStyleSheet()
     normal = ParagraphStyle(name="N", parent=styles["Normal"], fontName="DejaVuSans", fontSize=9)
     bold = ParagraphStyle(name="B", parent=styles["Normal"], fontName="DejaVuSans-Bold", fontSize=11, leading=14)
-    link_style = ParagraphStyle(name="L", parent=normal, textColor=colors.blue)
 
     grouped = defaultdict(list)
     for row in rows:
         key = f"{row.region or '—'} / {row.warehouse or '—'}"
-        grouped[key].append((
-            row.nomenclature or "—",
-            row.characteristic or "—",
-            row.photo_url or "",
-            row.bal,
-        ))
+        if detail:
+            grouped[key].append((row.nomenclature or "—", row.characteristic or "—", row.photo_url or "", row.bal))
+        else:
+            grouped[key].append((row.nomenclature or "—", row.bal))
 
     elems = []
     elems.append(Paragraph(breadcrumbs, bold))
@@ -305,21 +310,30 @@ async def export_pdf(
         if idx:
             elems.append(Spacer(1, 10))
         elems.append(Paragraph(grp_title, bold))
-        table_data = (
-            [[Paragraph("Номенклатура", normal), Paragraph("Характеристика", normal),
-              Paragraph("Фото", normal), Paragraph("Остаток", normal)]] +
-            [[
-                Paragraph(nom, normal),
-                Paragraph(char, normal),
-                Paragraph(f'<a href="{ph}" color="blue"><u>Ссылка</u></a>' if ph else "", normal),
-                f"{bal:,.0f}",
-            ] for nom, char, ph, bal in grp_items]
-        )
-        t = Table(table_data, colWidths=[200, 130, 80, 60])
+
+        if detail:
+            table_data = (
+                [[Paragraph("Номенклатура", normal), Paragraph("Характеристика", normal),
+                  Paragraph("Фото", normal), Paragraph("Остаток", normal)]] +
+                [[
+                    Paragraph(nom, normal),
+                    Paragraph(char, normal),
+                    Paragraph(f'<a href="{ph}" color="blue"><u>Ссылка</u></a>' if ph else "", normal),
+                    f"{bal:,.0f}",
+                ] for nom, char, ph, bal in grp_items]
+            )
+            t = Table(table_data, colWidths=[200, 130, 80, 60])
+        else:
+            table_data = (
+                [[Paragraph("Номенклатура", normal), Paragraph("Остаток", normal)]] +
+                [[Paragraph(nom, normal), f"{bal:,.0f}"] for nom, bal in grp_items]
+            )
+            t = Table(table_data, colWidths=[430, 80])
+
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("ALIGN", (3, 1), (3, -1), "RIGHT"),
+            ("ALIGN", (-1, 1), (-1, -1), "RIGHT"),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
             ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
         ]))
@@ -332,11 +346,13 @@ async def export_pdf(
 
     asyncio.create_task(log_activity(
         current_user.id, current_user.username, "pdf_export",
-        {"module": "supplies", "search": search, "group": group, "region": region,
-         "warehouse": warehouse, "category": category, "manufacturer": manufacturer, "brand": brand},
+        {"module": "supplies", "detail": detail, "search": search, "group": group,
+         "region": region, "warehouse": warehouse, "category": category,
+         "manufacturer": manufacturer, "brand": brand},
     ))
+    filename = "supplies_report_detail.pdf" if detail else "supplies_report.pdf"
     return StreamingResponse(
         buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=supplies_report.pdf"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

@@ -31,12 +31,13 @@ export const searchSupplies = (filters) =>
 
 // ── PDF-экспорт ────────────────────────────────────────────────────────────────
 
-export async function exportSuppliesPdf(filters) {
+export async function exportSuppliesPdf(filters, detail = true) {
   const token = localStorage.getItem('access_token')
   const params = new URLSearchParams()
   Object.entries(filters).forEach(([k, v]) => {
     if (v) params.append(k, v)
   })
+  params.append('detail', detail ? 'true' : 'false')
 
   const url = `/api/supplies/export-pdf?${params}`
   const response = await fetch(url, {
@@ -48,7 +49,7 @@ export async function exportSuppliesPdf(filters) {
   const blobUrl = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = blobUrl
-  link.setAttribute('download', 'supplies_report.pdf')
+  link.setAttribute('download', detail ? 'supplies_report_detail.pdf' : 'supplies_report.pdf')
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)

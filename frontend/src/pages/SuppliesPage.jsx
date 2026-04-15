@@ -15,7 +15,7 @@ export default function SuppliesPage() {
   const [page, setPage] = useState(1)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(null) // 'simple' | 'detail' | null
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [toast, setToast] = useState('')
 
@@ -68,14 +68,14 @@ export default function SuppliesPage() {
     setTimeout(() => setToast(''), 3000)
   }
 
-  const handlePdf = async () => {
-    setPdfLoading(true)
+  const handlePdf = async (detail) => {
+    setPdfLoading(detail ? 'detail' : 'simple')
     try {
-      await exportSuppliesPdf({ ...filters, search: search || undefined })
+      await exportSuppliesPdf({ ...filters, search: search || undefined }, detail)
     } catch {
       showToast('❌ Ошибка генерации PDF')
     } finally {
-      setPdfLoading(false)
+      setPdfLoading(null)
     }
   }
 
@@ -152,12 +152,20 @@ export default function SuppliesPage() {
                          focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <button
-              onClick={handlePdf}
-              disabled={pdfLoading || !result}
+              onClick={() => handlePdf(false)}
+              disabled={pdfLoading !== null || !result}
               className="bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-40
                          text-sm px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
             >
-              {pdfLoading ? '...' : '📄 PDF'}
+              {pdfLoading === 'simple' ? '...' : '📄 PDF Кратко'}
+            </button>
+            <button
+              onClick={() => handlePdf(true)}
+              disabled={pdfLoading !== null || !result}
+              className="bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-40
+                         text-sm px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
+            >
+              {pdfLoading === 'detail' ? '...' : '📄 PDF Детально'}
             </button>
           </div>
 
