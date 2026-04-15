@@ -125,7 +125,7 @@ export default function SearchPage() {
           </button>
           <button
             onClick={() => navigate('/home')}
-            className="text-white/80 hover:text-white transition-colors text-sm hidden md:inline"
+            className="text-white/80 hover:text-white transition-colors text-sm"
             title="На главную"
           >
             ← Главная
