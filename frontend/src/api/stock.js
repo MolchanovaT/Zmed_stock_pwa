@@ -40,8 +40,8 @@ export const getLpuList = (region = '') =>
  * @param {Object} filters — все 7 фильтров + search, page, per_page
  * @returns {{ items, total, page, total_pages, updated_at }}
  */
-export const searchStock = (filters) =>
-  client.get('/stock/search', { params: filters }).then((r) => r.data)
+export const searchStock = (filters, module = 'implants') =>
+  client.get('/stock/search', { params: { ...filters, module } }).then((r) => r.data)
 
 // ── PDF-экспорт ────────────────────────────────────────────────────────────────
 
@@ -49,10 +49,10 @@ export const searchStock = (filters) =>
  * Скачивает PDF с результатами поиска.
  * Открывает скачивание в браузере.
  */
-export async function exportPdf(filters) {
+export async function exportPdf(filters, module = 'implants') {
   const token = localStorage.getItem('access_token')
   const params = new URLSearchParams()
-  Object.entries(filters).forEach(([k, v]) => {
+  Object.entries({ ...filters, module }).forEach(([k, v]) => {
     if (v) params.append(k, v)
   })
 

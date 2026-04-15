@@ -10,20 +10,18 @@ app/api_main.py
 """
 
 import os
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from sqlalchemy import delete
 
 from app.api.auth import router as auth_router
 from app.api.stock import router as stock_router
 from app.api.cart import router as cart_router
-from app.db.models import PwaActivity
-from app.db.session import AsyncSessionLocal
+from app.api.supplies import router as supplies_router
+from app.api.inn_check import router as inn_check_router
 
 # ── CORS origins ───────────────────────────────────────────────────────────────
 _cors_raw = os.getenv("CORS_ORIGINS", "http://localhost:5173")
@@ -48,34 +46,11 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(stock_router)
 app.include_router(cart_router)
+app.include_router(supplies_router)
+app.include_router(inn_check_router)
 
 
-# ── Периодическая чистка старых данных ─────────────────────────────────────────
-PWA_ACTIVITY_RETAIN_DAYS: int = int(os.getenv("PWA_ACTIVITY_RETAIN_DAYS", "90"))
-
-
-@app.on_event("startup")
-async def schedule_cleanup():
-    import asyncio
-
-    async def cleanup_loop():
-        while True:
-            await asyncio.sleep(24 * 3600)   # раз в сутки
-            try:
-                cutoff = datetime.now(timezone.utc) - timedelta(days=PWA_ACTIVITY_RETAIN_DAYS)
-                async with AsyncSessionLocal() as s:
-                    result = await s.execute(
-                        delete(PwaActivity).where(PwaActivity.created_at < cutoff)
-                    )
-                    await s.commit()
-                    deleted = result.rowcount
-                if deleted:
-                    print(f"[cleanup] pwa_activity: удалено {deleted} записей старше {PWA_ACTIVITY_RETAIN_DAYS} дней",
-                          flush=True)
-            except Exception as e:
-                print(f"[cleanup] ошибка: {e}", flush=True)
-
-    asyncio.create_task(cleanup_loop())
+# Чистка pwa_activity перенесена в scheduler.py → nightly_cleanup() (03:00)
 
 
 # ── Раздача фронтенда (продакшен) ──────────────────────────────────────────────

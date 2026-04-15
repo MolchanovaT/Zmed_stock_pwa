@@ -66,15 +66,17 @@ export default function StockTable({ result, loading, page, onPageChange, onAddT
               </p>
             </div>
 
-            {/* Кнопка добавления */}
-            <button
-              onClick={() => onAddToCart(item)}
-              className="shrink-0 bg-brand-500 hover:bg-brand-600 active:bg-brand-700
-                         text-white text-xs font-semibold
-                         px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
-            >
-              + В корзину
-            </button>
+            {/* Кнопка добавления — только если передан обработчик */}
+            {onAddToCart && (
+              <button
+                onClick={() => onAddToCart(item)}
+                className="shrink-0 bg-brand-500 hover:bg-brand-600 active:bg-brand-700
+                           text-white text-xs font-semibold
+                           px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
+              >
+                + В корзину
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -44,6 +44,7 @@ class Token(BaseModel):
 class UserOut(BaseModel):
     id: int
     username: str
+    modules: list[str]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -106,4 +107,8 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user: AdminUser = Depends(get_current_user)):
     """Возвращает данные авторизованного пользователя."""
-    return {"id": current_user.id, "username": current_user.username}
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "modules": current_user.get_modules(),
+    }

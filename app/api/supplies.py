@@ -1,26 +1,24 @@
 """
-app/api/stock.py
+app/api/supplies.py
 
-REST-эндпоинты для работы с остатками.
-Логика фильтрации переиспользует функцию uniq() из app.bot.handlers.
-PDF генерируется той же логикой, что и в handlers.download_pdf.
+REST-эндпоинты для расходников и инструментов (таблица «stock», модуль «supplies»).
+Аналогичен app/api/stock.py, но без nom_type и без корзины.
+PDF включает ссылки на фото из photo_url.
 
 Эндпоинты:
-  GET /api/stock/groups
-  GET /api/stock/regions
-  GET /api/stock/warehouses
-  GET /api/stock/categories
-  GET /api/stock/manufacturers
-  GET /api/stock/brands
-  GET /api/stock/nom-types
-  GET /api/stock/search
-  GET /api/stock/export-pdf
+  GET /api/supplies/groups
+  GET /api/supplies/regions
+  GET /api/supplies/warehouses
+  GET /api/supplies/categories
+  GET /api/supplies/manufacturers
+  GET /api/supplies/brands
+  GET /api/supplies/search
+  GET /api/supplies/export-pdf
 """
 
 import asyncio
 import io
 import os
-import tempfile
 from collections import defaultdict
 from math import ceil
 from typing import Optional
@@ -37,44 +35,56 @@ from sqlalchemy import select, func
 
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
-from app.bot.handlers import uniq, FILTER_MAP   # переиспользуем готовую логику
-from app.db.models import AdminUser, Stock
+from app.db.models import AdminUser, Supplies
 from app.db.session import AsyncSessionLocal
 
-router = APIRouter(prefix="/api/stock", tags=["stock"])
+router = APIRouter(prefix="/api/supplies", tags=["supplies"])
 
-# Регистрируем шрифты один раз при импорте модуля
 _FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
 try:
     pdfmetrics.registerFont(TTFont("DejaVuSans", os.path.join(_FONT_DIR, "DejaVuSans.ttf")))
     pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf")))
 except Exception:
-    pass  # шрифты уже зарегистрированы или файлы не найдены
+    pass
 
 
 # ── Вспомогательные функции ────────────────────────────────────────────────────
 
-def _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, nom_type, search):
-    """Применяет активные фильтры к SQLAlchemy-запросу."""
+async def _uniq(col: str, session, **filters) -> list[str]:
+    """Уникальные ненулевые значения колонки с учётом фильтров."""
+    stmt = select(getattr(Supplies, col)).distinct()
+    for k, v in filters.items():
+        if v:
+            stmt = stmt.filter(getattr(Supplies, k) == v)
+    res = await session.scalars(stmt)
+    values = [x for x in res.all() if x is not None]
+    values = [v for v in values if str(v).strip().lower() != "итого"]
+    return sorted(values)
+
+
+def _v(val: Optional[str]) -> Optional[str]:
+    """None если значение пустое или 'все'."""
+    return val if val and val.lower() != "все" else None
+
+
+def _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, search):
     filter_values = {
-        "group_name": group,
-        "region": region,
-        "warehouse": warehouse,
-        "category": category,
-        "manufacturer": manufacturer,
-        "brand": brand,
-        "nom_type": nom_type,
+        "group_name": _v(group),
+        "region": _v(region),
+        "warehouse": _v(warehouse),
+        "category": _v(category),
+        "manufacturer": _v(manufacturer),
+        "brand": _v(brand),
     }
     for col_name, val in filter_values.items():
-        if val and val.lower() != "все":
-            stmt = stmt.filter(getattr(Stock, col_name) == val)
+        if val:
+            stmt = stmt.filter(getattr(Supplies, col_name) == val)
 
     if search:
         like = f"%{search}%"
         stmt = stmt.filter(
-            Stock.nomenclature.ilike(like) |
-            Stock.article.ilike(like) |
-            Stock.characteristic.ilike(like)
+            Supplies.nomenclature.ilike(like) |
+            Supplies.characteristic.ilike(like)
         )
     return stmt
 
@@ -83,9 +93,8 @@ def _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand
 
 @router.get("/groups")
 async def get_groups(_: AdminUser = Depends(get_current_user)):
-    """Список групп складов (верхний уровень фильтрации)."""
     async with AsyncSessionLocal() as s:
-        values = await uniq("group_name", s)
+        values = await _uniq("group_name", s)
     return {"items": values}
 
 
@@ -94,9 +103,8 @@ async def get_regions(
     group: Optional[str] = Query(None),
     _: AdminUser = Depends(get_current_user),
 ):
-    """Список регионов (фильтруется по group)."""
     async with AsyncSessionLocal() as s:
-        values = await uniq("region", s, group_name=group if group and group != "все" else None)
+        values = await _uniq("region", s, group_name=_v(group))
     return {"items": values}
 
 
@@ -107,11 +115,7 @@ async def get_warehouses(
     _: AdminUser = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
-        values = await uniq(
-            "warehouse", s,
-            group_name=group if group and group != "все" else None,
-            region=region if region and region != "все" else None,
-        )
+        values = await _uniq("warehouse", s, group_name=_v(group), region=_v(region))
     return {"items": values}
 
 
@@ -123,11 +127,9 @@ async def get_categories(
     _: AdminUser = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
-        values = await uniq(
+        values = await _uniq(
             "category", s,
-            group_name=group if group and group != "все" else None,
-            region=region if region and region != "все" else None,
-            warehouse=warehouse if warehouse and warehouse != "все" else None,
+            group_name=_v(group), region=_v(region), warehouse=_v(warehouse),
         )
     return {"items": values}
 
@@ -141,12 +143,10 @@ async def get_manufacturers(
     _: AdminUser = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
-        values = await uniq(
+        values = await _uniq(
             "manufacturer", s,
-            group_name=group if group and group != "все" else None,
-            region=region if region and region != "все" else None,
-            warehouse=warehouse if warehouse and warehouse != "все" else None,
-            category=category if category and category != "все" else None,
+            group_name=_v(group), region=_v(region),
+            warehouse=_v(warehouse), category=_v(category),
         )
     return {"items": values}
 
@@ -161,36 +161,10 @@ async def get_brands(
     _: AdminUser = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
-        values = await uniq(
+        values = await _uniq(
             "brand", s,
-            group_name=group if group and group != "все" else None,
-            region=region if region and region != "все" else None,
-            warehouse=warehouse if warehouse and warehouse != "все" else None,
-            category=category if category and category != "все" else None,
-            manufacturer=manufacturer if manufacturer and manufacturer != "все" else None,
-        )
-    return {"items": values}
-
-
-@router.get("/nom-types")
-async def get_nom_types(
-    group: Optional[str] = Query(None),
-    region: Optional[str] = Query(None),
-    warehouse: Optional[str] = Query(None),
-    category: Optional[str] = Query(None),
-    manufacturer: Optional[str] = Query(None),
-    brand: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
-):
-    async with AsyncSessionLocal() as s:
-        values = await uniq(
-            "nom_type", s,
-            group_name=group if group and group != "все" else None,
-            region=region if region and region != "все" else None,
-            warehouse=warehouse if warehouse and warehouse != "все" else None,
-            category=category if category and category != "все" else None,
-            manufacturer=manufacturer if manufacturer and manufacturer != "все" else None,
-            brand=brand if brand and brand != "все" else None,
+            group_name=_v(group), region=_v(region), warehouse=_v(warehouse),
+            category=_v(category), manufacturer=_v(manufacturer),
         )
     return {"items": values}
 
@@ -198,38 +172,31 @@ async def get_nom_types(
 # ── Поиск ─────────────────────────────────────────────────────────────────────
 
 @router.get("/search")
-async def search_stock(
+async def search_supplies(
     group: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
     warehouse: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     manufacturer: Optional[str] = Query(None),
     brand: Optional[str] = Query(None),
-    nom_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    module: Optional[str] = Query(None),   # implants | implants_view
     current_user: AdminUser = Depends(get_current_user),
 ):
-    """
-    Поиск остатков с пагинацией.
-    Возвращает: {items, total, page, total_pages, updated_at}
-    """
     async with AsyncSessionLocal() as s:
         stmt = (
             select(
-                Stock.article,
-                Stock.nomenclature,
-                Stock.characteristic,
-                func.sum(Stock.balance).label("bal"),
-                func.max(Stock.updated_at).label("ts"),
+                Supplies.nomenclature,
+                Supplies.characteristic,
+                Supplies.photo_url,
+                func.sum(Supplies.balance).label("bal"),
+                func.max(Supplies.updated_at).label("ts"),
             )
-            .where(Stock.nomenclature.is_not(None))
-            .group_by(Stock.article, Stock.nomenclature, Stock.characteristic)
+            .where(Supplies.nomenclature.is_not(None))
+            .group_by(Supplies.nomenclature, Supplies.characteristic, Supplies.photo_url)
         )
-        stmt = _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, nom_type, search)
-
+        stmt = _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, search)
         all_rows = (await s.execute(stmt)).all()
 
     total = len(all_rows)
@@ -238,18 +205,17 @@ async def search_stock(
     start = (page - 1) * per_page
     chunk = all_rows[start: start + per_page]
 
-    # Дата актуальности — максимальный updated_at по всей выборке
     if all_rows:
-        max_ts = max(row.ts for row in all_rows if row.ts)
+        max_ts = max((row.ts for row in all_rows if row.ts), default=None)
         updated_at = max_ts.strftime("%d.%m.%Y %H:%M") if max_ts else "–"
     else:
         updated_at = "–"
 
     items = [
         {
-            "article": row.article or "",
             "nomenclature": row.nomenclature or "",
             "characteristic": row.characteristic or "",
+            "photo_url": row.photo_url or "",
             "balance": float(row.bal or 0),
         }
         for row in chunk
@@ -257,9 +223,9 @@ async def search_stock(
 
     asyncio.create_task(log_activity(
         current_user.id, current_user.username, "search",
-        {"module": module or "implants", "search": search, "group": group, "region": region,
+        {"module": "supplies", "search": search, "group": group, "region": region,
          "warehouse": warehouse, "category": category, "manufacturer": manufacturer,
-         "brand": brand, "nom_type": nom_type, "results": total},
+         "brand": brand, "results": total},
     ))
     return {
         "items": items,
@@ -280,56 +246,55 @@ async def export_pdf(
     category: Optional[str] = Query(None),
     manufacturer: Optional[str] = Query(None),
     brand: Optional[str] = Query(None),
-    nom_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    module: Optional[str] = Query(None),   # implants | implants_view
     current_user: AdminUser = Depends(get_current_user),
 ):
-    """
-    Генерирует PDF с результатами поиска и возвращает файл для скачивания.
-    Логика идентична handlers.download_pdf.
-    """
     async with AsyncSessionLocal() as s:
         stmt = (
             select(
-                Stock.region,
-                Stock.warehouse,
-                Stock.article,
-                Stock.nomenclature,
-                Stock.characteristic,
-                func.sum(Stock.balance).label("bal"),
+                Supplies.region,
+                Supplies.warehouse,
+                Supplies.nomenclature,
+                Supplies.characteristic,
+                Supplies.photo_url,
+                func.sum(Supplies.balance).label("bal"),
             )
-            .group_by(Stock.region, Stock.warehouse, Stock.article, Stock.nomenclature, Stock.characteristic)
+            .group_by(
+                Supplies.region, Supplies.warehouse,
+                Supplies.nomenclature, Supplies.characteristic, Supplies.photo_url,
+            )
         )
-        stmt = _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, nom_type, search)
+        stmt = _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand, search)
         rows = (await s.execute(stmt)).all()
 
-        ts_stmt = select(func.max(Stock.updated_at))
-        ts_stmt = _apply_filters(ts_stmt, group, region, warehouse, category, manufacturer, brand, nom_type, search)
+        ts_stmt = select(func.max(Supplies.updated_at))
+        ts_stmt = _apply_filters(ts_stmt, group, region, warehouse, category, manufacturer, brand, search)
         max_ts = await s.scalar(ts_stmt)
 
     ts_str = max_ts.strftime("%d.%m.%Y %H:%M") if max_ts else "–"
 
-    # Формируем хлебные крошки из активных фильтров
     labels = {
         "Склад": group, "Регион": region, "Склад внутри региона": warehouse,
-        "Категория": category, "Производитель": manufacturer,
-        "Марка": brand, "Вид номенклатуры": nom_type,
+        "Категория": category, "Производитель": manufacturer, "Марка": brand,
     }
     breadcrumbs = "<br/>".join(
         f"{label}: {val}" for label, val in labels.items() if val and val != "все"
     ) or "Все позиции"
 
-    # ── Строим PDF ─────────────────────────────────────────────────
     styles = getSampleStyleSheet()
     normal = ParagraphStyle(name="N", parent=styles["Normal"], fontName="DejaVuSans", fontSize=9)
     bold = ParagraphStyle(name="B", parent=styles["Normal"], fontName="DejaVuSans-Bold", fontSize=11, leading=14)
+    link_style = ParagraphStyle(name="L", parent=normal, textColor=colors.blue)
 
     grouped = defaultdict(list)
     for row in rows:
         key = f"{row.region or '—'} / {row.warehouse or '—'}"
-        title = f"{row.article or '—'}, {row.nomenclature or '—'}, {row.characteristic or '—'}"
-        grouped[key].append((title, row.bal))
+        grouped[key].append((
+            row.nomenclature or "—",
+            row.characteristic or "—",
+            row.photo_url or "",
+            row.bal,
+        ))
 
     elems = []
     elems.append(Paragraph(breadcrumbs, bold))
@@ -341,14 +306,20 @@ async def export_pdf(
             elems.append(Spacer(1, 10))
         elems.append(Paragraph(grp_title, bold))
         table_data = (
-            [[Paragraph("Артикул, номенклатура, характеристика", normal), Paragraph("Ост", normal)]] +
-            [[Paragraph(t, normal), f"{b:,.0f}"] for t, b in grp_items]
+            [[Paragraph("Номенклатура", normal), Paragraph("Характеристика", normal),
+              Paragraph("Фото", normal), Paragraph("Остаток", normal)]] +
+            [[
+                Paragraph(nom, normal),
+                Paragraph(char, normal),
+                Paragraph(f'<a href="{ph}" color="blue"><u>Ссылка</u></a>' if ph else "", normal),
+                f"{bal:,.0f}",
+            ] for nom, char, ph, bal in grp_items]
         )
-        t = Table(table_data, colWidths=[370, 80])
+        t = Table(table_data, colWidths=[200, 130, 80, 60])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+            ("ALIGN", (3, 1), (3, -1), "RIGHT"),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
             ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
         ]))
@@ -361,12 +332,11 @@ async def export_pdf(
 
     asyncio.create_task(log_activity(
         current_user.id, current_user.username, "pdf_export",
-        {"module": module or "implants", "search": search, "group": group, "region": region,
-         "warehouse": warehouse, "category": category, "manufacturer": manufacturer,
-         "brand": brand, "nom_type": nom_type},
+        {"module": "supplies", "search": search, "group": group, "region": region,
+         "warehouse": warehouse, "category": category, "manufacturer": manufacturer, "brand": brand},
     ))
     return StreamingResponse(
         buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=report.pdf"},
+        headers={"Content-Disposition": "attachment; filename=supplies_report.pdf"},
     )

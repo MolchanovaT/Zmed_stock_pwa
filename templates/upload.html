@@ -2,16 +2,19 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Загрузка остатков</title>
+    <title>Управление пользователями</title>
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 </head>
 <body class="p-4">
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="mb-0">📦 Загрузка файла остатков</h2>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">🏥 Управление остатками</h2>
     <div class="d-flex gap-2">
-        <a href="{{ url_for('stats') }}" class="btn btn-outline-primary btn-sm">📊 Статистика</a>
+        <a href="{{ url_for('implants_upload') }}" class="btn btn-outline-secondary btn-sm">⚕️ Импланты</a>
+        <a href="{{ url_for('supplies_upload') }}" class="btn btn-outline-secondary btn-sm">🔧 Расходники</a>
+        <a href="{{ url_for('inn_upload') }}" class="btn btn-outline-secondary btn-sm">🔍 ИНН</a>
+        <a href="{{ url_for('stats') }}" class="btn btn-outline-secondary btn-sm">📊 Статистика</a>
         <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Выйти</a>
     </div>
 </div>
@@ -25,39 +28,44 @@
 {% endfor %}
 {% endwith %}
 
-<form method="post" enctype="multipart/form-data" class="mb-4 row g-2">
-    <div class="col-auto">
-        <input class="form-control" type="file"
-               name="file" accept=".csv,.txt,.xls,.xlsx,.zip" required>
-    </div>
-
-    <div class="col-auto">
-        <select class="form-select" name="src">
-            <option value="main">Центральный склад</option>
-            <option value="remote">Удалённые склады</option>
-        </select>
-    </div>
-
-    <div class="col-auto">
-        <button class="btn btn-primary">Загрузить</button>
-    </div>
-</form>
-
-<hr>
-
 <h4>👥 Пользователи PWA</h4>
 
-<table class="table table-sm table-striped align-middle">
-    <thead>
+{% set all_modules = [
+    ("implants",      "⚕️ Импланты (заказ)"),
+    ("implants_view", "⚕️ Импланты (просмотр)"),
+    ("supplies",      "🔧 Расходники"),
+    ("inn_check",     "🔍 Проверка ИНН"),
+] %}
+
+<table class="table table-sm table-bordered align-middle">
+    <thead class="table-light">
     <tr>
         <th>Логин</th>
+        <th>Доступные модули</th>
         <th></th>
     </tr>
     </thead>
     <tbody>
     {% for u in pwa_users %}
+    {% set user_modules = u.get_modules() %}
     <tr>
-        <td>{{ u.username }}</td>
+        <td class="fw-semibold">{{ u.username }}</td>
+        <td>
+            <form action="{{ url_for('user_set_modules', user_id=u.id) }}" method="post"
+                  class="d-flex flex-wrap gap-3 align-items-center">
+                {% for mod_id, mod_label in all_modules %}
+                <div class="form-check form-check-inline mb-0">
+                    <input class="form-check-input" type="checkbox"
+                           name="mod_{{ mod_id }}" id="mod_{{ u.id }}_{{ mod_id }}"
+                           {% if mod_id in user_modules %}checked{% endif %}>
+                    <label class="form-check-label small" for="mod_{{ u.id }}_{{ mod_id }}">
+                        {{ mod_label }}
+                    </label>
+                </div>
+                {% endfor %}
+                <button class="btn btn-primary btn-sm ms-2">Сохранить</button>
+            </form>
+        </td>
         <td style="width:1%">
             <form action="{{ url_for('user_del', user_id=u.id) }}" method="post"
                   onsubmit="return confirm('Удалить пользователя {{ u.username }}?');">
@@ -67,7 +75,7 @@
     </tr>
     {% else %}
     <tr>
-        <td colspan="2"><em>Список пуст</em></td>
+        <td colspan="3"><em>Список пуст</em></td>
     </tr>
     {% endfor %}
     </tbody>
@@ -89,5 +97,6 @@
     </div>
 </form>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

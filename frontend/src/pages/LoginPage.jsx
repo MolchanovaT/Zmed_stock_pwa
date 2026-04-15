@@ -21,7 +21,7 @@ export default function LoginPage() {
       localStorage.setItem('access_token', access_token)
       const user = await getMe()
       signin(access_token, user)
-      navigate('/', { replace: true })
+      navigate('/home', { replace: true })
     } catch (err) {
       setError(
         err.response?.data?.detail || 'Неверный логин или пароль'
@@ -39,7 +39,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <div className="text-4xl mb-2">🏥</div>
           <h1 className="text-2xl font-bold text-brand-600">ZMed Stock</h1>
-          <p className="text-sm text-gray-500 mt-1">Остатки имплантов</p>
+          <p className="text-sm text-gray-500 mt-1">Управление остатками</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

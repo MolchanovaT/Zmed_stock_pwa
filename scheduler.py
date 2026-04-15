@@ -14,17 +14,24 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 
 from app.tools.import_csv import load_file
+from app.tools.import_supplies import load_supplies_file
 from app.tools.zip_helper import extract_zip
 
 # ──────────── конфигурация ────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-YD_MAIN_FOLDER = os.getenv("YD_MAIN_FOLDER")  # публичные URL-ы
-YD_REMOTE_FOLDER = os.getenv("YD_REMOTE_FOLDER")
+# Временная папка для скачанных файлов (не засоряем корень проекта)
+DOWNLOAD_DIR = BASE_DIR / "uploads"
+DOWNLOAD_DIR.mkdir(exist_ok=True)
 
-CRON_MAIN = int(os.getenv("CRON_MAIN_MINUTES", 5))  # период опроса
+YD_MAIN_FOLDER = os.getenv("YD_MAIN_FOLDER")      # публичные URL-ы (импланты)
+YD_REMOTE_FOLDER = os.getenv("YD_REMOTE_FOLDER")
+YD_SUPPLIES_FOLDER = os.getenv("YD_SUPPLIES_FOLDER")  # расходники/инструменты
+
+CRON_MAIN = int(os.getenv("CRON_MAIN_MINUTES", 5))       # период опроса
 CRON_REMOTE = int(os.getenv("CRON_REMOTE_MINUTES", 30))
+CRON_SUPPLIES = int(os.getenv("CRON_SUPPLIES_MINUTES", 60))
 
 ZIP_PASSWORD = os.getenv("ZIP_PASSWORD", "")
 
@@ -118,7 +125,7 @@ async def process_folder(pub_url: str, src: str) -> None:
         assert latest_dt  # уже проверяли выше
 
         yd_path = latest["path"]
-        local_path = BASE_DIR / latest["name"]
+        local_path = DOWNLOAD_DIR / latest["name"]
 
         _print(f"{src}: ⬇️  скачиваем {latest['name']}")
         async with aiohttp.ClientSession() as s:
@@ -166,28 +173,133 @@ async def process_folder(pub_url: str, src: str) -> None:
                 p.unlink(missing_ok=True)
 
 
+async def process_supplies_folder() -> None:
+    """Загружает свежий файл расходников из публичной папки Я.Диска."""
+    if not YD_SUPPLIES_FOLDER:
+        return
+    try:
+        _print("🔄 supplies: проверяем папку…")
+        async with aiohttp.ClientSession() as s:
+            items = await _public_list(s, YD_SUPPLIES_FOLDER)
+
+        files = [it for it in items
+                 if it.get("file") and Path(it["name"]).suffix.lower() in ALLOWED_EXT
+                 and ts_from_filename(it["name"])]
+        if not files:
+            _print("⚠️  supplies: нет файлов подходящего формата")
+            return
+
+        latest = max(files, key=lambda it: ts_from_filename(it["name"]))
+        latest_dt = ts_from_filename(latest["name"])
+        local_path = DOWNLOAD_DIR / latest["name"]
+
+        _print(f"supplies: ⬇️  скачиваем {latest['name']}")
+        async with aiohttp.ClientSession() as s:
+            await _public_download(s, YD_SUPPLIES_FOLDER, latest["path"], local_path)
+
+        load_supplies_file(local_path, file_dt=latest_dt)
+
+        for it in files:
+            dt = ts_from_filename(it["name"])
+            if dt and dt <= latest_dt:
+                await _yd_delete(it["path"], "supplies")
+            _print(f"supplies: 🗑 удалён {it['name']}")
+
+    except Exception as exc:
+        _print(f"❌ supplies: ошибка – {exc}\n{traceback.format_exc()}")
+    finally:
+        p = locals().get("local_path")
+        if isinstance(p, Path):
+            p.unlink(missing_ok=True)
+
+
 TG_INTERACTIONS_RETAIN_DAYS = int(os.getenv("TG_INTERACTIONS_RETAIN_DAYS", "180"))
+PWA_ACTIVITY_RETAIN_DAYS   = int(os.getenv("PWA_ACTIVITY_RETAIN_DAYS", "90"))
+CARTS_RETAIN_DAYS          = int(os.getenv("CARTS_RETAIN_DAYS", "365"))
 
 
-async def cleanup_old_interactions() -> None:
-    """Удаляет записи tg_interactions старше TG_INTERACTIONS_RETAIN_DAYS дней."""
+async def nightly_cleanup() -> None:
+    """
+    Ночная чистка БД (03:00 МСК):
+      1. tg_interactions  — старше TG_INTERACTIONS_RETAIN_DAYS дней
+      2. pwa_activity     — старше PWA_ACTIVITY_RETAIN_DAYS дней
+      3. carts + items    — оформленные заказы старше CARTS_RETAIN_DAYS дней
+      4. VACUUM           — освобождаем реальное место на диске
+    """
     from datetime import timezone
     from sqlalchemy import text as sa_text
     from app.db.session import AsyncSessionLocal
+    from app.config import DB_DSN
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=TG_INTERACTIONS_RETAIN_DAYS)
+    utc = timezone.utc
+    now = datetime.now(utc)
+
     try:
         async with AsyncSessionLocal() as s:
-            result = await s.execute(
-                sa_text("DELETE FROM tg_interactions WHERE created_at < :cutoff"),
-                {"cutoff": cutoff},
+
+            # 1. tg_interactions
+            cutoff = now - timedelta(days=TG_INTERACTIONS_RETAIN_DAYS)
+            r = await s.execute(
+                sa_text("DELETE FROM tg_interactions WHERE created_at < :c"),
+                {"c": cutoff},
             )
+            if r.rowcount:
+                _print(f"🧹 tg_interactions: удалено {r.rowcount} строк "
+                       f"(>{TG_INTERACTIONS_RETAIN_DAYS} дней)")
+
+            # 2. pwa_activity
+            cutoff = now - timedelta(days=PWA_ACTIVITY_RETAIN_DAYS)
+            r = await s.execute(
+                sa_text("DELETE FROM pwa_activity WHERE created_at < :c"),
+                {"c": cutoff},
+            )
+            if r.rowcount:
+                _print(f"🧹 pwa_activity: удалено {r.rowcount} строк "
+                       f"(>{PWA_ACTIVITY_RETAIN_DAYS} дней)")
+
+            # 3. cart_items → carts (сначала items, потом корзины)
+            cutoff = now - timedelta(days=CARTS_RETAIN_DAYS)
+            r = await s.execute(
+                sa_text("""
+                    DELETE FROM cart_items
+                    WHERE cart_id IN (
+                        SELECT id FROM carts
+                        WHERE status = 'submitted' AND created_at < :c
+                    )
+                """),
+                {"c": cutoff},
+            )
+            items_deleted = r.rowcount
+            r = await s.execute(
+                sa_text("DELETE FROM carts WHERE status = 'submitted' AND created_at < :c"),
+                {"c": cutoff},
+            )
+            if r.rowcount:
+                _print(f"🧹 carts/cart_items: удалено {r.rowcount} заказов "
+                       f"/ {items_deleted} позиций (>{CARTS_RETAIN_DAYS} дней)")
+
             await s.commit()
-            deleted = result.rowcount
-        if deleted:
-            _print(f"🧹 tg_interactions: удалено {deleted} записей старше {TG_INTERACTIONS_RETAIN_DAYS} дней")
+
     except Exception as exc:
-        _print(f"❌ cleanup_old_interactions: {exc}")
+        _print(f"❌ nightly_cleanup: {exc}\n{traceback.format_exc()}")
+        return
+
+    # 4. VACUUM — только для SQLite, возвращает реальное место на диске
+    if "sqlite" in DB_DSN:
+        try:
+            import sqlite3
+            db_path = DB_DSN.replace("sqlite:///", "")
+            if not db_path.startswith("/"):
+                db_path = str(BASE_DIR / db_path)
+            size_before = Path(db_path).stat().st_size / 1024 / 1024
+            con = sqlite3.connect(db_path)
+            con.execute("VACUUM")
+            con.close()
+            size_after = Path(db_path).stat().st_size / 1024 / 1024
+            _print(f"🗜  VACUUM: {size_before:.1f} МБ → {size_after:.1f} МБ "
+                   f"(освобождено {size_before - size_after:.1f} МБ)")
+        except Exception as exc:
+            _print(f"❌ VACUUM: {exc}")
 
 
 # ──────────── запуск планировщика ────────────────────────────
@@ -196,18 +308,26 @@ def main() -> None:
     asyncio.set_event_loop(loop)
 
     # первая попытка сразу
-    loop.create_task(process_folder(YD_MAIN_FOLDER, "main"))
-    loop.create_task(process_folder(YD_REMOTE_FOLDER, "remote"))
+    if YD_MAIN_FOLDER:
+        loop.create_task(process_folder(YD_MAIN_FOLDER, "main"))
+    if YD_REMOTE_FOLDER:
+        loop.create_task(process_folder(YD_REMOTE_FOLDER, "remote"))
+    if YD_SUPPLIES_FOLDER:
+        loop.create_task(process_supplies_folder())
 
     sched = AsyncIOScheduler(event_loop=loop)
-    sched.add_job(process_folder, "interval",
-                  args=[YD_MAIN_FOLDER, "main"],
-                  minutes=CRON_MAIN)
-    sched.add_job(process_folder, "interval",
-                  args=[YD_REMOTE_FOLDER, "remote"],
-                  minutes=CRON_REMOTE)
-    # Чистка старых взаимодействий — раз в сутки в 03:00
-    sched.add_job(cleanup_old_interactions, "cron", hour=3, minute=0)
+    if YD_MAIN_FOLDER:
+        sched.add_job(process_folder, "interval",
+                      args=[YD_MAIN_FOLDER, "main"],
+                      minutes=CRON_MAIN)
+    if YD_REMOTE_FOLDER:
+        sched.add_job(process_folder, "interval",
+                      args=[YD_REMOTE_FOLDER, "remote"],
+                      minutes=CRON_REMOTE)
+    if YD_SUPPLIES_FOLDER:
+        sched.add_job(process_supplies_folder, "interval", minutes=CRON_SUPPLIES)
+    # Ночная чистка БД + VACUUM — раз в сутки в 03:00
+    sched.add_job(nightly_cleanup, "cron", hour=3, minute=0)
     sched.start()
 
     _print(f"🕒 Планировщик запущен — main:{CRON_MAIN} мин, remote:{CRON_REMOTE} мин.")
