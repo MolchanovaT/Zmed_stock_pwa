@@ -81,14 +81,9 @@ export default function ImplantsViewPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* ── Шапка ───────────────────────────────────────────────────────────── */}
-      <header className="bg-brand-500 text-white px-4 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <button
-            className="md:hidden text-white text-xl"
-            onClick={() => setFiltersOpen((o) => !o)}
-          >
-            ☰
-          </button>
+      <header className="bg-brand-500 text-white shadow-md">
+        {/* Ряд 1: навигация */}
+        <div className="px-4 pt-3 pb-1.5 flex items-center justify-between">
           <button
             onClick={() => navigate('/home')}
             className="text-white/80 hover:text-white transition-colors text-sm"
@@ -96,11 +91,17 @@ export default function ImplantsViewPage() {
             ← Главная
           </button>
           <h1 className="font-bold text-lg">Импланты — просмотр</h1>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="hidden md:inline text-white/70">{user?.username}</span>
-          <button onClick={signout} className="text-white/70 hover:text-white transition-colors">
+          <button onClick={signout} className="text-white/70 hover:text-white transition-colors text-sm">
             Выйти
+          </button>
+        </div>
+        {/* Ряд 2: фильтры (только мобильный) */}
+        <div className="md:hidden px-4 pb-2.5">
+          <button
+            className="text-white/80 hover:text-white transition-colors text-sm flex items-center gap-1"
+            onClick={() => setFiltersOpen((o) => !o)}
+          >
+            ☰ Фильтры
           </button>
         </div>
       </header>

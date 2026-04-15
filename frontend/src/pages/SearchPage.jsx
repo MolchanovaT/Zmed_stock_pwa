@@ -114,51 +114,49 @@ export default function SearchPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* ── Шапка ───────────────────────────────────────────────────────────── */}
-      <header className="bg-brand-500 text-white px-4 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          {/* Кнопка фильтров (мобильная) */}
-          <button
-            className="md:hidden text-white text-xl"
-            onClick={() => setFiltersOpen((o) => !o)}
-          >
-            ☰
-          </button>
+      <header className="bg-brand-500 text-white shadow-md">
+        {/* Ряд 1: навигация */}
+        <div className="px-4 pt-3 pb-1.5 flex items-center justify-between">
           <button
             onClick={() => navigate('/home')}
             className="text-white/80 hover:text-white transition-colors text-sm"
-            title="На главную"
           >
             ← Главная
           </button>
           <h1 className="font-bold text-lg">Импланты</h1>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <button
-            onClick={() => navigate('/orders')}
-            className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            📋 Заказы
-          </button>
-          <button
-            onClick={() => navigate('/cart')}
-            className="relative bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            🛒 Корзина
-            {cartCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs
-                               font-bold rounded-full min-w-[18px] h-[18px] flex items-center
-                               justify-center px-1 leading-none">
-                {cartCount}
-              </span>
-            )}
-          </button>
-          <span className="hidden md:inline text-white/70">{user?.username}</span>
-          <button
-            onClick={signout}
-            className="text-white/70 hover:text-white transition-colors"
-          >
+          <button onClick={signout} className="text-white/70 hover:text-white transition-colors text-sm">
             Выйти
           </button>
+        </div>
+        {/* Ряд 2: действия */}
+        <div className="px-4 pb-2.5 flex items-center justify-between text-sm">
+          <button
+            className="md:hidden text-white/80 hover:text-white transition-colors flex items-center gap-1"
+            onClick={() => setFiltersOpen((o) => !o)}
+          >
+            ☰ Фильтры
+          </button>
+          <div className="flex items-center gap-2 md:ml-auto">
+            <button
+              onClick={() => navigate('/orders')}
+              className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors"
+            >
+              📋 Заказы
+            </button>
+            <button
+              onClick={() => navigate('/cart')}
+              className="relative bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors"
+            >
+              🛒 Корзина
+              {cartCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs
+                                 font-bold rounded-full min-w-[18px] h-[18px] flex items-center
+                                 justify-center px-1 leading-none">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 

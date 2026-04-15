@@ -67,23 +67,27 @@ export default function CartPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Шапка */}
-      <header className="bg-brand-500 text-white px-4 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/')} className="text-white/80 hover:text-white">
-            ← Поиск
+      <header className="bg-brand-500 text-white shadow-md">
+        {/* Ряд 1: навигация */}
+        <div className="px-4 pt-3 pb-1.5 flex items-center justify-between">
+          <button onClick={() => navigate('/home')} className="text-white/80 hover:text-white transition-colors text-sm">
+            ← Главная
           </button>
           <h1 className="font-bold text-lg">Корзина</h1>
+          <button onClick={signout} className="text-white/70 hover:text-white transition-colors text-sm">
+            Выйти
+          </button>
         </div>
-        <div className="flex items-center gap-3 text-sm">
+        {/* Ряд 2: действия */}
+        <div className="px-4 pb-2.5 flex items-center justify-between text-sm">
+          <button onClick={() => navigate('/')} className="text-white/80 hover:text-white transition-colors">
+            ← Поиск
+          </button>
           <button
             onClick={() => navigate('/orders')}
-            className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
+            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors"
           >
             📋 Заказы
-          </button>
-          <span className="text-white/70 hidden md:inline">{user?.username}</span>
-          <button onClick={signout} className="text-white/70 hover:text-white">
-            Выйти
           </button>
         </div>
       </header>
