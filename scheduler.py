@@ -197,7 +197,16 @@ async def process_supplies_folder() -> None:
         async with aiohttp.ClientSession() as s:
             await _public_download(s, YD_SUPPLIES_FOLDER, latest["path"], local_path)
 
-        load_supplies_file(local_path, file_dt=latest_dt)
+        if local_path.suffix.lower() == ".zip":
+            if not ZIP_PASSWORD:
+                _print("❌ ZIP_PASSWORD не задан – пропускаем файл")
+                return
+            working_file, _ = extract_zip(local_path, ZIP_PASSWORD)
+        else:
+            working_file = local_path
+
+        _print(f"supplies: ✅ импортируем, актуально на {latest_dt:%d.%m.%Y %H:%M}")
+        load_supplies_file(working_file, file_dt=latest_dt)
 
         for it in files:
             dt = ts_from_filename(it["name"])
@@ -208,9 +217,9 @@ async def process_supplies_folder() -> None:
     except Exception as exc:
         _print(f"❌ supplies: ошибка – {exc}\n{traceback.format_exc()}")
     finally:
-        p = locals().get("local_path")
-        if isinstance(p, Path):
-            p.unlink(missing_ok=True)
+        for p in [locals().get("local_path"), locals().get("working_file")]:
+            if isinstance(p, Path):
+                p.unlink(missing_ok=True)
 
 
 TG_INTERACTIONS_RETAIN_DAYS = int(os.getenv("TG_INTERACTIONS_RETAIN_DAYS", "180"))
