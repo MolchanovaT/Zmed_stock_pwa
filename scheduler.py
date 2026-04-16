@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import shutil
+
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -165,10 +167,15 @@ async def process_folder(pub_url: str, src: str) -> None:
     except Exception as exc:
         _print(f"❌ {src}: ошибка – {exc}\n{traceback.format_exc()}")
     finally:
-        # локальные временные файлы удаляем в любом случае
-        for p in [locals().get("local_path"), locals().get("working_file")]:
-            if isinstance(p, Path):
-                p.unlink(missing_ok=True)
+        local_path = locals().get("local_path")
+        working_file = locals().get("working_file")
+        # если working_file — распакованный из ZIP, удаляем всю temp-папку
+        if isinstance(working_file, Path) and isinstance(local_path, Path) and working_file != local_path:
+            shutil.rmtree(working_file.parent, ignore_errors=True)
+        elif isinstance(working_file, Path):
+            working_file.unlink(missing_ok=True)
+        if isinstance(local_path, Path):
+            local_path.unlink(missing_ok=True)
 
 
 async def process_supplies_folder() -> None:
@@ -215,9 +222,14 @@ async def process_supplies_folder() -> None:
     except Exception as exc:
         _print(f"❌ supplies: ошибка – {exc}\n{traceback.format_exc()}")
     finally:
-        for p in [locals().get("local_path"), locals().get("working_file")]:
-            if isinstance(p, Path):
-                p.unlink(missing_ok=True)
+        local_path = locals().get("local_path")
+        working_file = locals().get("working_file")
+        if isinstance(working_file, Path) and isinstance(local_path, Path) and working_file != local_path:
+            shutil.rmtree(working_file.parent, ignore_errors=True)
+        elif isinstance(working_file, Path):
+            working_file.unlink(missing_ok=True)
+        if isinstance(local_path, Path):
+            local_path.unlink(missing_ok=True)
 
 
 TG_INTERACTIONS_RETAIN_DAYS = int(os.getenv("TG_INTERACTIONS_RETAIN_DAYS", "180"))
