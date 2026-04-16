@@ -39,6 +39,7 @@ ZIP_PASSWORD = os.getenv("ZIP_PASSWORD", "")
 YD_TOKEN = os.getenv("YD_TOKEN", "")
 YD_MAIN_PREFIX = os.getenv("YD_MAIN_PREFIX", "").strip("/")
 YD_REMOTE_PREFIX = os.getenv("YD_REMOTE_PREFIX", "").strip("/")
+YD_SUPPLIES_PREFIX = os.getenv("YD_SUPPLIES_PREFIX", "").strip("/")
 
 ALLOWED_EXT = {".csv", ".txt", ".xls", ".xlsx", ".zip"}
 
@@ -92,7 +93,12 @@ async def _yd_delete(raw_path: str, src: str) -> None:
     if raw_path.startswith("disk:"):
         full = raw_path
     else:
-        root = YD_MAIN_PREFIX if src == "main" else YD_REMOTE_PREFIX
+        if src == "main":
+            root = YD_MAIN_PREFIX
+        elif src == "supplies":
+            root = YD_SUPPLIES_PREFIX
+        else:
+            root = YD_REMOTE_PREFIX
         full = f"disk:/{root}/{raw_path.lstrip('/')}"
     async with aiohttp.ClientSession(
             headers={"Authorization": f"OAuth {YD_TOKEN}"}  # bearer-токен
@@ -151,18 +157,10 @@ async def process_folder(pub_url: str, src: str) -> None:
 
         # ── чистим старые файлы ──────────────────────────────────
         for it in files:
-            # if it["path"] == yd_path:
-            #     continue
-            # dt = ts_from_filename(it["name"])
-            # if dt and dt < latest_dt:
-            #     await _yd_delete(it["path"], src)
-            #     _print(f"{src}: 🗑 удалён {it['name']} ({dt:%d.%m.%Y %H:%M})")
-
             dt = ts_from_filename(it["name"])
-            # удаляем всё, что "не свежее" текущего latest_dt
             if dt and dt <= latest_dt:
                 await _yd_delete(it["path"], src)
-            _print(f"{src}: 🗑 удалён {it['name']} ({dt:%d.%m.%Y %H:%M})")
+                _print(f"{src}: 🗑 удалён {it['name']} ({dt:%d.%m.%Y %H:%M})")
 
     except Exception as exc:
         _print(f"❌ {src}: ошибка – {exc}\n{traceback.format_exc()}")
@@ -212,7 +210,7 @@ async def process_supplies_folder() -> None:
             dt = ts_from_filename(it["name"])
             if dt and dt <= latest_dt:
                 await _yd_delete(it["path"], "supplies")
-            _print(f"supplies: 🗑 удалён {it['name']}")
+                _print(f"supplies: 🗑 удалён {it['name']}")
 
     except Exception as exc:
         _print(f"❌ supplies: ошибка – {exc}\n{traceback.format_exc()}")
