@@ -2,9 +2,13 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Проверка ИНН — загрузка</title>
+    <title>Проверка ИНН — управление</title>
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        .table-actions { white-space: nowrap; width: 1%; }
+        .inn-table td, .inn-table th { vertical-align: middle; }
+    </style>
 </head>
 <body class="p-4">
 
@@ -47,7 +51,7 @@
 </div>
 
 <!-- Загрузка CSV -->
-<div class="card mb-3">
+<div class="card mb-4">
     <div class="card-body">
         <h5 class="card-title">Загрузить CSV (полная замена)</h5>
         <p class="text-muted small mb-3">
@@ -76,6 +80,256 @@
     </div>
 </div>
 
+{# Макрос для строки таблицы Дилеры/ЛПУ #}
+{% macro row_simple(item, table) %}
+<tr>
+    <td>{{ item.name }}</td>
+    <td><code>{{ item.inn }}</code></td>
+    <td>
+        <form action="{{ url_for('inn_toggle', table=table, item_id=item.id) }}" method="post" class="d-inline">
+            <button class="btn btn-sm {{ 'btn-success' if item.allowed else 'btn-outline-danger' }}"
+                    title="Переключить статус">
+                {{ '✅ Разрешено' if item.allowed else '❌ Запрещено' }}
+            </button>
+        </form>
+    </td>
+    <td class="table-actions">
+        <button class="btn btn-sm btn-outline-primary"
+                data-bs-toggle="modal" data-bs-target="#editModal"
+                data-table="{{ table }}" data-id="{{ item.id }}"
+                data-name="{{ item.name }}" data-inn="{{ item.inn }}"
+                data-allowed="{{ 1 if item.allowed else 0 }}">
+            ✏️
+        </button>
+        <form action="{{ url_for('inn_del', table=table, item_id=item.id) }}" method="post" class="d-inline"
+              onsubmit="return confirm('Удалить запись «{{ item.name }}»?');">
+            <button class="btn btn-sm btn-outline-danger">🗑</button>
+        </form>
+    </td>
+</tr>
+{% endmacro %}
+
+<!-- ────────── Дилеры ────────── -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">📂 Дилеры <span class="badge bg-primary">{{ counts.dilers }}</span></h5>
+
+        <form action="{{ url_for('inn_add') }}" method="post" class="row g-2 align-items-end mb-3">
+            <input type="hidden" name="table" value="dilers">
+            <div class="col-md-5">
+                <input class="form-control form-control-sm" type="text" name="name"
+                       placeholder="Название дилера" required>
+            </div>
+            <div class="col-md-3">
+                <input class="form-control form-control-sm" type="text" name="inn"
+                       placeholder="ИНН" pattern="\d+" required>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-success btn-sm">➕ Добавить</button>
+            </div>
+        </form>
+
+        <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+            <table class="table table-sm table-bordered table-hover inn-table">
+                <thead class="table-light sticky-top">
+                <tr><th>Название</th><th style="width:160px">ИНН</th><th style="width:170px">Статус</th><th></th></tr>
+                </thead>
+                <tbody>
+                {% for it in dilers %}{{ row_simple(it, 'dilers') }}{% else %}
+                <tr><td colspan="4" class="text-muted text-center"><em>Список пуст</em></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ────────── ЛПУ ────────── -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">📂 ЛПУ <span class="badge bg-success">{{ counts.lpu }}</span></h5>
+
+        <form action="{{ url_for('inn_add') }}" method="post" class="row g-2 align-items-end mb-3">
+            <input type="hidden" name="table" value="lpu">
+            <div class="col-md-5">
+                <input class="form-control form-control-sm" type="text" name="name"
+                       placeholder="Название ЛПУ" required>
+            </div>
+            <div class="col-md-3">
+                <input class="form-control form-control-sm" type="text" name="inn"
+                       placeholder="ИНН" pattern="\d+" required>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-success btn-sm">➕ Добавить</button>
+            </div>
+        </form>
+
+        <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+            <table class="table table-sm table-bordered table-hover inn-table">
+                <thead class="table-light sticky-top">
+                <tr><th>Название</th><th style="width:160px">ИНН</th><th style="width:170px">Статус</th><th></th></tr>
+                </thead>
+                <tbody>
+                {% for it in lpus %}{{ row_simple(it, 'lpu') }}{% else %}
+                <tr><td colspan="4" class="text-muted text-center"><em>Список пуст</em></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ────────── На рассмотрении ────────── -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">⏳ На рассмотрении <span class="badge bg-warning text-dark">{{ counts.pending }}</span></h5>
+
+        <form action="{{ url_for('inn_add') }}" method="post" class="row g-2 align-items-end mb-3">
+            <input type="hidden" name="table" value="pending">
+            <div class="col-md-4">
+                <input class="form-control form-control-sm" type="text" name="name"
+                       placeholder="Название контрагента" required>
+            </div>
+            <div class="col-md-2">
+                <input class="form-control form-control-sm" type="text" name="inn"
+                       placeholder="ИНН" pattern="\d+" required>
+            </div>
+            <div class="col-md-2">
+                <input class="form-control form-control-sm" type="date" name="date">
+            </div>
+            <div class="col-auto">
+                <div class="form-check form-check-inline mt-1">
+                    <input class="form-check-input" type="checkbox" name="approved" id="add_pend_appr">
+                    <label class="form-check-label small" for="add_pend_appr">✅</label>
+                </div>
+                <div class="form-check form-check-inline mt-1">
+                    <input class="form-check-input" type="checkbox" name="denied" id="add_pend_den">
+                    <label class="form-check-label small" for="add_pend_den">❌</label>
+                </div>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-success btn-sm">➕ Добавить</button>
+            </div>
+        </form>
+
+        <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+            <table class="table table-sm table-bordered table-hover inn-table">
+                <thead class="table-light sticky-top">
+                <tr>
+                    <th>Контрагент</th>
+                    <th style="width:140px">ИНН</th>
+                    <th style="width:120px">Дата</th>
+                    <th style="width:80px">✅</th>
+                    <th style="width:80px">❌</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for it in pending %}
+                <tr>
+                    <td>{{ it.name }}</td>
+                    <td><code>{{ it.inn }}</code></td>
+                    <td>{{ it.date or '—' }}</td>
+                    <td>{% if it.approved %}✅{% else %}—{% endif %}</td>
+                    <td>{% if it.denied %}❌{% else %}—{% endif %}</td>
+                    <td class="table-actions">
+                        <button class="btn btn-sm btn-outline-primary"
+                                data-bs-toggle="modal" data-bs-target="#editModal"
+                                data-table="pending" data-id="{{ it.id }}"
+                                data-name="{{ it.name }}" data-inn="{{ it.inn }}"
+                                data-date="{{ it.date or '' }}"
+                                data-approved="{{ 1 if it.approved else 0 }}"
+                                data-denied="{{ 1 if it.denied else 0 }}">
+                            ✏️
+                        </button>
+                        <form action="{{ url_for('inn_del', table='pending', item_id=it.id) }}" method="post"
+                              class="d-inline"
+                              onsubmit="return confirm('Удалить запись «{{ it.name }}»?');">
+                            <button class="btn btn-sm btn-outline-danger">🗑</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-muted text-center"><em>Список пуст</em></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ────────── Модальное окно редактирования ────────── -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="editForm" method="post" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">✏️ Редактирование</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Название</label>
+                    <input class="form-control" type="text" name="name" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">ИНН</label>
+                    <input class="form-control" type="text" name="inn" pattern="\d+" required>
+                </div>
+
+                <div id="editSimpleFields">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="allowed" id="edit_allowed">
+                        <label class="form-check-label" for="edit_allowed">✅ Разрешено</label>
+                    </div>
+                </div>
+
+                <div id="editPendingFields" style="display:none;">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Дата</label>
+                        <input class="form-control" type="date" name="date">
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="approved" id="edit_approved">
+                        <label class="form-check-label" for="edit_approved">✅ Разрешено</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="denied" id="edit_denied">
+                        <label class="form-check-label" for="edit_denied">❌ Запрещено</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="submit" class="btn btn-primary">💾 Сохранить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const editModal = document.getElementById('editModal');
+    const editForm  = document.getElementById('editForm');
+    editModal.addEventListener('show.bs.modal', (e) => {
+        const btn = e.relatedTarget;
+        const table = btn.dataset.table;
+        const id    = btn.dataset.id;
+        editForm.action = `/inn/edit/${table}/${id}`;
+        editForm.querySelector('[name="name"]').value = btn.dataset.name || '';
+        editForm.querySelector('[name="inn"]').value  = btn.dataset.inn  || '';
+
+        const isPending = table === 'pending';
+        document.getElementById('editSimpleFields').style.display  = isPending ? 'none' : '';
+        document.getElementById('editPendingFields').style.display = isPending ? '' : 'none';
+
+        if (isPending) {
+            editForm.querySelector('[name="date"]').value     = btn.dataset.date || '';
+            editForm.querySelector('[name="approved"]').checked = btn.dataset.approved === '1';
+            editForm.querySelector('[name="denied"]').checked   = btn.dataset.denied === '1';
+        } else {
+            editForm.querySelector('[name="allowed"]').checked = btn.dataset.allowed === '1';
+        }
+    });
+</script>
 </body>
 </html>

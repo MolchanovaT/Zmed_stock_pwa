@@ -215,6 +215,13 @@ def supplies_upload():
 # ─────────────────────────────
 # Загрузка CSV для проверки ИНН
 
+INN_MODELS = {
+    "dilers":  InnDiler,
+    "lpu":     InnLpu,
+    "pending": InnPending,
+}
+
+
 @app.route("/inn/upload", methods=["GET", "POST"])
 @login_required
 def inn_upload():
@@ -224,7 +231,7 @@ def inn_upload():
         if not f or Path(f.filename).suffix.lower() != ".csv":
             flash("⚠️ Разрешены только CSV-файлы", "error")
             return redirect(url_for("inn_upload"))
-        if table not in ("dilers", "lpu", "pending"):
+        if table not in INN_MODELS:
             flash("⚠️ Неверная таблица", "error")
             return redirect(url_for("inn_upload"))
 
@@ -264,12 +271,117 @@ def inn_upload():
             filepath.unlink(missing_ok=True)
         return redirect(url_for("inn_upload"))
 
-    counts = {
-        "dilers":  db_session.query(InnDiler).count(),
-        "lpu":     db_session.query(InnLpu).count(),
-        "pending": db_session.query(InnPending).count(),
-    }
-    return render_template("inn_upload.html", counts=counts)
+    dilers  = db_session.query(InnDiler).order_by(InnDiler.name).all()
+    lpus    = db_session.query(InnLpu).order_by(InnLpu.name).all()
+    pending = db_session.query(InnPending).order_by(InnPending.date.desc().nullslast(),
+                                                    InnPending.name).all()
+    counts = {"dilers": len(dilers), "lpu": len(lpus), "pending": len(pending)}
+    return render_template("inn_upload.html",
+                           counts=counts,
+                           dilers=dilers, lpus=lpus, pending=pending)
+
+
+@app.post("/inn/add")
+@login_required
+def inn_add():
+    table = request.form.get("table", "")
+    name  = (request.form.get("name") or "").strip()
+    inn   = (request.form.get("inn") or "").strip()
+
+    if table not in INN_MODELS:
+        flash("⚠️ Неверная таблица", "error")
+        return redirect(url_for("inn_upload"))
+    if not name or not inn:
+        flash("⚠️ Заполните название и ИНН", "error")
+        return redirect(url_for("inn_upload"))
+
+    Model = INN_MODELS[table]
+    if db_session.query(Model).filter_by(inn=inn).first():
+        flash(f"⚠️ ИНН {inn} уже есть в таблице", "warning")
+        return redirect(url_for("inn_upload"))
+
+    if table == "pending":
+        date_str = (request.form.get("date") or "").strip()
+        approved = 1 if request.form.get("approved") else 0
+        denied   = 1 if request.form.get("denied") else 0
+        if denied and not date_str:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+        rec = InnPending(name=name, inn=inn, date=date_str or None,
+                         approved=approved, denied=denied)
+    else:
+        rec = Model(name=name, inn=inn, allowed=1)
+
+    db_session.add(rec)
+    db_session.commit()
+    flash(f"✅ Запись «{name}» добавлена", "success")
+    return redirect(url_for("inn_upload"))
+
+
+@app.post("/inn/edit/<string:table>/<int:item_id>")
+@login_required
+def inn_edit(table, item_id):
+    if table not in INN_MODELS:
+        flash("⚠️ Неверная таблица", "error")
+        return redirect(url_for("inn_upload"))
+    Model = INN_MODELS[table]
+    rec = db_session.get(Model, item_id)
+    if not rec:
+        flash("⚠️ Запись не найдена", "error")
+        return redirect(url_for("inn_upload"))
+
+    name = (request.form.get("name") or "").strip()
+    inn  = (request.form.get("inn") or "").strip()
+    if not name or not inn:
+        flash("⚠️ Заполните название и ИНН", "error")
+        return redirect(url_for("inn_upload"))
+
+    rec.name = name
+    rec.inn  = inn
+    if table == "pending":
+        rec.date     = (request.form.get("date") or "").strip() or None
+        rec.approved = 1 if request.form.get("approved") else 0
+        rec.denied   = 1 if request.form.get("denied") else 0
+        if rec.denied and not rec.date:
+            rec.date = datetime.now().strftime("%Y-%m-%d")
+    else:
+        rec.allowed = 1 if request.form.get("allowed") else 0
+
+    try:
+        db_session.commit()
+        flash("✅ Запись обновлена", "success")
+    except Exception as e:
+        db_session.rollback()
+        flash(f"❌ Ошибка: {e}", "error")
+    return redirect(url_for("inn_upload"))
+
+
+@app.post("/inn/del/<string:table>/<int:item_id>")
+@login_required
+def inn_del(table, item_id):
+    if table not in INN_MODELS:
+        flash("⚠️ Неверная таблица", "error")
+        return redirect(url_for("inn_upload"))
+    Model = INN_MODELS[table]
+    rec = db_session.get(Model, item_id)
+    if rec:
+        db_session.delete(rec)
+        db_session.commit()
+        flash(f"🗑 Запись «{rec.name}» удалена", "success")
+    return redirect(url_for("inn_upload"))
+
+
+@app.post("/inn/toggle/<string:table>/<int:item_id>")
+@login_required
+def inn_toggle(table, item_id):
+    if table not in ("dilers", "lpu"):
+        flash("⚠️ Неверная таблица", "error")
+        return redirect(url_for("inn_upload"))
+    Model = INN_MODELS[table]
+    rec = db_session.get(Model, item_id)
+    if rec:
+        rec.allowed = 0 if rec.allowed else 1
+        db_session.commit()
+    return redirect(url_for("inn_upload"))
 
 
 @app.post("/user/modules/<int:user_id>")
