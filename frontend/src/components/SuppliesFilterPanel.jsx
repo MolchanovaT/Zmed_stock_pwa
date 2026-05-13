@@ -3,6 +3,7 @@ import {
   getSuppliesGroups, getSuppliesRegions, getSuppliesWarehouses,
   getSuppliesCategories, getSuppliesManufacturers, getSuppliesBrands,
 } from '../api/supplies'
+import SearchableSelect from './SearchableSelect'
 
 const ALL = 'все'
 
@@ -94,8 +95,7 @@ export default function SuppliesFilterPanel({ onFiltersChange, disabled }) {
     if (filters.brand !== undefined) onFiltersChange(filters)
   }, [filters.brand]) // eslint-disable-line
 
-  const handleChange = (field) => (e) => {
-    const value = e.target.value
+  const handleChange = (field) => (value) => {
     setFilters((f) => ({ ...f, [field]: value }))
   }
 
@@ -104,21 +104,14 @@ export default function SuppliesFilterPanel({ onFiltersChange, disabled }) {
       <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
         {label}
       </label>
-      <select
-        disabled={disabled || isLoading || opts.length === 0}
+      <SearchableSelect
         value={filters[field]}
         onChange={handleChange(field)}
-        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm
-                   focus:outline-none focus:ring-2 focus:ring-teal-500
-                   disabled:bg-gray-100 disabled:text-gray-400"
-      >
-        <option value="">
-          {isLoading ? 'Загрузка...' : opts.length === 0 ? '—' : '— выберите —'}
-        </option>
-        {opts.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-      </select>
+        options={opts}
+        disabled={disabled}
+        isLoading={isLoading}
+        accent="teal"
+      />
     </div>
   )
 

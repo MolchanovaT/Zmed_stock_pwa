@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { getLpuList } from '../api/stock'
+import SearchableSelect from './SearchableSelect'
+
+const MANUAL_LABEL = '✏️ Ввести вручную'
 
 // Конвертация YYYY-MM-DD → ДД.ММ.ГГГГ для отправки на бэкенд
 function toRuDate(isoDate) {
@@ -97,20 +100,18 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
           ЛПУ{initialLpu && <span className="ml-1 normal-case font-normal text-green-600">(подставлено из фильтра)</span>}
         </label>
-        <select
-          value={form.lpu}
-          onChange={(e) => setForm((f) => ({ ...f, lpu: e.target.value, lpu_manual: '' }))}
-          disabled={submitting || lpuLoading}
-          className={inputClass('lpu')}
-        >
-          <option value="">
-            {lpuLoading ? 'Загрузка...' : '— выберите ЛПУ —'}
-          </option>
-          {lpuList.map((lpu) => (
-            <option key={lpu} value={lpu}>{lpu}</option>
-          ))}
-          <option value="__manual__">✏️ Ввести вручную</option>
-        </select>
+        <SearchableSelect
+          value={form.lpu === '__manual__' ? MANUAL_LABEL : form.lpu}
+          onChange={(v) => setForm((f) => ({
+            ...f,
+            lpu: v === MANUAL_LABEL ? '__manual__' : v,
+            lpu_manual: '',
+          }))}
+          options={[...lpuList, MANUAL_LABEL]}
+          disabled={submitting}
+          isLoading={lpuLoading}
+          accent="brand"
+        />
         {errors.lpu && <p className="text-xs text-red-500 mt-0.5">{errors.lpu}</p>}
       </div>
 
