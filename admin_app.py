@@ -14,7 +14,10 @@ from app.db.session import db_session
 from app.tools.import_csv import load_file
 from app.tools.zip_helper import extract_zip
 
-from app.db.models import AdminUser, PwaActivity, InnDiler, InnLpu, InnPending
+from functools import wraps
+from flask import abort
+
+from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending
 from app.tools.import_supplies import load_supplies_file
 
 # ─────────────────────────────
@@ -58,7 +61,28 @@ def too_large(_):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db_session.get(AdminUser, int(user_id))
+    return db_session.get(User, int(user_id))
+
+
+@app.before_request
+def gate_admin_by_superuser():
+    """Глобальный гейтинг: все роуты Flask-админки кроме /login, /logout
+    и статики требуют is_superuser=1 AND active=1.
+    Если пользователь не залогинен — пропускаем дальше, @login_required
+    в самом роуте даст редирект на /login."""
+    open_endpoints = {"login", "logout", "static"}
+    if request.endpoint in open_endpoints or request.endpoint is None:
+        return
+    if not current_user.is_authenticated:
+        return
+    if not (current_user.is_superuser and current_user.active):
+        abort(403)
+
+
+@app.errorhandler(403)
+def forbidden(_):
+    return ("403 Доступ запрещён. "
+            "Эта страница доступна только суперпользователям.", 403)
 
 
 # ─────────────────────────────
@@ -69,8 +93,12 @@ def login():
     if request.method == "POST":
         username = request.form["username"]
         password = request.form["password"]
-        user = db_session.query(AdminUser).filter_by(username=username).first()
-        if user and user.check_password(password):
+        user = db_session.query(User).filter_by(username=username).first()
+        if user and user.active and user.check_password(password):
+            if not user.is_superuser:
+                flash("❌ Доступ к админ-панели только у суперпользователей. "
+                      "Обычным пользователям — основной сайт PWA.", "error")
+                return redirect("/login")
             login_user(user)
             return redirect(url_for("upload_file"))
         flash("❌ Неверный логин или пароль", "error")
@@ -91,8 +119,10 @@ def logout():
 @app.route("/", methods=["GET"])
 @login_required
 def upload_file():
-    pwa_users = db_session.query(AdminUser).order_by(AdminUser.username).all()
-    return render_template("upload.html", pwa_users=pwa_users)
+    users = db_session.query(User).order_by(
+        User.username.is_(None), User.username, User.full_name
+    ).all()
+    return render_template("upload.html", users=users)
 
 
 # ─────────────────────────────
@@ -151,40 +181,80 @@ def create_admin_user():
 
     Base.metadata.create_all(bind=db_session.bind)
 
-    if not db_session.query(AdminUser).filter_by(username=username).first():
-        user = AdminUser(username=username)
+    if not db_session.query(User).filter_by(username=username).first():
+        user = User(username=username, is_superuser=1, active=1,
+                    modules=json.dumps(["implants", "implants_view",
+                                        "supplies", "inn_check"]))
         user.set_password(password)
         db_session.add(user)
         db_session.commit()
 
 
+ALL_MODULES = ["implants", "implants_view", "supplies", "inn_check",
+               "bot_supplies", "bot_implants"]
+
+
+def _parse_modules(form) -> str:
+    """Собирает JSON-список модулей из чек-боксов формы."""
+    selected = [m for m in ALL_MODULES if form.get(f"mod_{m}")]
+    return json.dumps(selected)
+
+
+def _normalize_tg_id(raw: str) -> int | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if not raw.lstrip("-").isdigit():
+        return "INVALID"
+    return int(raw)
+
+
 @app.post("/user/add")
 @login_required
 def user_add():
-    username = request.form.get("username", "").strip()
-    password = request.form.get("password", "").strip()
+    username = (request.form.get("username") or "").strip() or None
+    password = (request.form.get("password") or "").strip() or None
+    tg_id_raw = request.form.get("tg_id") or ""
+    full_name = (request.form.get("full_name") or "").strip() or None
+    title     = (request.form.get("title") or "").strip() or None
+    is_super  = 1 if request.form.get("is_superuser") else 0
+    active    = 1 if request.form.get("active", "1") else 0
 
-    if not username or not password:
-        flash("Логин и пароль обязательны.", "error")
+    tg_id = _normalize_tg_id(tg_id_raw)
+    if tg_id == "INVALID":
+        flash("tg_id должен быть числом.", "error")
         return redirect(url_for("upload_file"))
 
-    if not re.fullmatch(r'[a-zA-Z0-9_\-]+', username):
-        flash("Логин: только латинские буквы, цифры, _ и -", "error")
+    if not username and not tg_id:
+        flash("Нужно указать хотя бы логин (для PWA) или tg_id (для бота).", "error")
         return redirect(url_for("upload_file"))
 
-    if db_session.query(AdminUser).filter_by(username=username).first():
-        flash(f"Пользователь «{username}» уже существует.", "warning")
-        return redirect(url_for("upload_file"))
+    if username:
+        if not re.fullmatch(r'[a-zA-Z0-9_\-]+', username):
+            flash("Логин: только латинские буквы, цифры, _ и -", "error")
+            return redirect(url_for("upload_file"))
+        if not password:
+            flash("Если указан логин — обязателен пароль.", "error")
+            return redirect(url_for("upload_file"))
+        if db_session.query(User).filter_by(username=username).first():
+            flash(f"Пользователь «{username}» уже существует.", "warning")
+            return redirect(url_for("upload_file"))
 
-    u = AdminUser(username=username)
-    u.set_password(password)
+    if tg_id is not None:
+        if db_session.query(User).filter_by(tg_id=tg_id).first():
+            flash(f"Пользователь с tg_id {tg_id} уже существует.", "warning")
+            return redirect(url_for("upload_file"))
+
+    u = User(username=username, tg_id=tg_id, full_name=full_name, title=title,
+             modules=_parse_modules(request.form),
+             is_superuser=is_super, active=active)
+    if password:
+        u.set_password(password)
     db_session.add(u)
     db_session.commit()
-    flash(f"✅ Пользователь «{username}» добавлен.", "success")
+    label = username or f"tg:{tg_id}"
+    flash(f"✅ Пользователь «{label}» добавлен.", "success")
     return redirect(url_for("upload_file"))
-
-
-ALL_MODULES = ["implants", "implants_view", "supplies", "inn_check"]
 
 # ─────────────────────────────
 # Загрузка файла расходников
@@ -384,18 +454,92 @@ def inn_toggle(table, item_id):
     return redirect(url_for("inn_upload"))
 
 
-@app.post("/user/modules/<int:user_id>")
+@app.post("/user/save/<int:user_id>")
 @login_required
-def user_set_modules(user_id: int):
-    u = db_session.get(AdminUser, user_id)
+def user_save(user_id: int):
+    """Inline-сохранение: модули + флаги is_superuser/active."""
+    u = db_session.get(User, user_id)
     if not u:
         flash("Пользователь не найден.", "error")
         return redirect(url_for("upload_file"))
 
-    selected = [m for m in ALL_MODULES if request.form.get(f"mod_{m}")]
-    u.modules = json.dumps(selected)
+    u.modules = _parse_modules(request.form)
+    new_super = 1 if request.form.get("is_superuser") else 0
+    new_active = 1 if request.form.get("active") else 0
+
+    if current_user.id == user_id and (not new_super or not new_active):
+        flash("Нельзя снять с себя is_superuser или active.", "error")
+        return redirect(url_for("upload_file"))
+
+    u.is_superuser = new_super
+    u.active = new_active
     db_session.commit()
-    flash(f"✅ Модули пользователя «{u.username}» обновлены: {', '.join(selected) or 'нет доступа'}.", "success")
+    flash(f"✅ Настройки пользователя «{u.username or u.full_name or u.tg_id}» сохранены.", "success")
+    return redirect(url_for("upload_file"))
+
+
+@app.post("/user/edit/<int:user_id>")
+@login_required
+def user_edit(user_id: int):
+    """Изменение текстовых полей: username, full_name, title, tg_id."""
+    u = db_session.get(User, user_id)
+    if not u:
+        flash("Пользователь не найден.", "error")
+        return redirect(url_for("upload_file"))
+
+    username = (request.form.get("username") or "").strip() or None
+    full_name = (request.form.get("full_name") or "").strip() or None
+    title     = (request.form.get("title") or "").strip() or None
+    tg_id     = _normalize_tg_id(request.form.get("tg_id") or "")
+    if tg_id == "INVALID":
+        flash("tg_id должен быть числом.", "error")
+        return redirect(url_for("upload_file"))
+
+    if username and not re.fullmatch(r'[a-zA-Z0-9_\-]+', username):
+        flash("Логин: только латинские буквы, цифры, _ и -", "error")
+        return redirect(url_for("upload_file"))
+
+    if username and username != u.username:
+        if db_session.query(User).filter_by(username=username).first():
+            flash(f"Логин «{username}» уже занят.", "warning")
+            return redirect(url_for("upload_file"))
+    if tg_id is not None and tg_id != u.tg_id:
+        if db_session.query(User).filter_by(tg_id=tg_id).first():
+            flash(f"tg_id {tg_id} уже занят.", "warning")
+            return redirect(url_for("upload_file"))
+
+    if not username and not tg_id:
+        flash("Нельзя оставить пользователя без логина и без tg_id.", "error")
+        return redirect(url_for("upload_file"))
+
+    u.username = username
+    u.full_name = full_name
+    u.title = title
+    u.tg_id = tg_id
+    db_session.commit()
+    flash("✅ Данные обновлены.", "success")
+    return redirect(url_for("upload_file"))
+
+
+@app.post("/user/setpw/<int:user_id>")
+@login_required
+def user_setpw(user_id: int):
+    """Сброс пароля. Если пароль пустой и есть tg_id — снимаем PWA-доступ."""
+    u = db_session.get(User, user_id)
+    if not u:
+        flash("Пользователь не найден.", "error")
+        return redirect(url_for("upload_file"))
+    password = (request.form.get("password") or "").strip()
+    if password:
+        u.set_password(password)
+        flash(f"✅ Пароль для «{u.username}» обновлён.", "success")
+    else:
+        if not u.tg_id:
+            flash("Нельзя очистить пароль у PWA-only пользователя — он перестанет логиниться.", "error")
+            return redirect(url_for("upload_file"))
+        u.password_hash = None
+        flash(f"PWA-доступ снят, остаётся tg-доступ.", "success")
+    db_session.commit()
     return redirect(url_for("upload_file"))
 
 
@@ -406,11 +550,12 @@ def user_del(user_id: int):
         flash("Нельзя удалить самого себя.", "error")
         return redirect(url_for("upload_file"))
 
-    u = db_session.get(AdminUser, user_id)
+    u = db_session.get(User, user_id)
     if u:
+        label = u.username or u.full_name or f"tg:{u.tg_id}"
         db_session.delete(u)
         db_session.commit()
-        flash(f"🗑 Пользователь «{u.username}» удалён.", "success")
+        flash(f"🗑 Пользователь «{label}» удалён.", "success")
     else:
         flash("Пользователь не найден.", "error")
     return redirect(url_for("upload_file"))
@@ -579,7 +724,7 @@ def stats():
             "created_at": a.created_at,
         })
 
-    users = db_session.query(AdminUser).order_by(AdminUser.username).all()
+    users = db_session.query(User).filter(User.username.isnot(None)).order_by(User.username).all()
 
     pivot_actions = ["search", "pdf_export", "add_to_cart", "place_order"]
 

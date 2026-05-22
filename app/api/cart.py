@@ -23,7 +23,7 @@ from sqlalchemy import select, delete
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
 from app.bot.handlers import send_order_notification  # переиспользуем логику email
-from app.db.models import AdminUser, Cart, CartItem
+from app.db.models import User, Cart, CartItem
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/cart", tags=["cart"])
@@ -90,7 +90,7 @@ async def _get_active_cart(user_id: int, session) -> Optional[Cart]:
 # ── Эндпоинты ─────────────────────────────────────────────────────────────────
 
 @router.get("")
-async def get_cart(current_user: AdminUser = Depends(get_current_user)):
+async def get_cart(current_user: User = Depends(get_current_user)):
     """Возвращает активную корзину пользователя вместе со всеми позициями."""
     async with AsyncSessionLocal() as s:
         cart = await _get_active_cart(current_user.id, s)
@@ -106,7 +106,7 @@ async def get_cart(current_user: AdminUser = Depends(get_current_user)):
 @router.post("/items", status_code=status.HTTP_201_CREATED)
 async def add_cart_item(
     body: CartItemIn,
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Добавляет позицию в активную корзину.
@@ -154,7 +154,7 @@ async def add_cart_item(
 async def update_cart_item(
     item_id: int,
     body: QuantityPatch,
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Изменяет количество позиции в корзине."""
     async with AsyncSessionLocal() as s:
@@ -178,7 +178,7 @@ async def update_cart_item(
 @router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_cart_item(
     item_id: int,
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Удаляет позицию из корзины."""
     async with AsyncSessionLocal() as s:
@@ -195,7 +195,7 @@ async def delete_cart_item(
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-async def clear_cart(current_user: AdminUser = Depends(get_current_user)):
+async def clear_cart(current_user: User = Depends(get_current_user)):
     """Удаляет все позиции из активной корзины и саму корзину."""
     async with AsyncSessionLocal() as s:
         cart = await _get_active_cart(current_user.id, s)
@@ -209,7 +209,7 @@ async def clear_cart(current_user: AdminUser = Depends(get_current_user)):
 
 
 @router.get("/orders")
-async def get_orders(current_user: AdminUser = Depends(get_current_user)):
+async def get_orders(current_user: User = Depends(get_current_user)):
     """Возвращает все оформленные заказы текущего пользователя (status=submitted)."""
     async with AsyncSessionLocal() as s:
         carts_res = await s.execute(
@@ -233,7 +233,7 @@ async def get_orders(current_user: AdminUser = Depends(get_current_user)):
 @router.post("/order")
 async def place_order(
     body: OrderIn,
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Оформляет заказ:

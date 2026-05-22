@@ -35,7 +35,7 @@ from sqlalchemy import select, func
 
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
-from app.db.models import AdminUser, Supplies
+from app.db.models import User, Supplies
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/supplies", tags=["supplies"])
@@ -92,7 +92,7 @@ def _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand
 # ── Эндпоинты фильтров ─────────────────────────────────────────────────────────
 
 @router.get("/groups")
-async def get_groups(_: AdminUser = Depends(get_current_user)):
+async def get_groups(_: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as s:
         values = await _uniq("group_name", s)
     return {"items": values}
@@ -101,7 +101,7 @@ async def get_groups(_: AdminUser = Depends(get_current_user)):
 @router.get("/regions")
 async def get_regions(
     group: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await _uniq("region", s, group_name=_v(group))
@@ -112,7 +112,7 @@ async def get_regions(
 async def get_warehouses(
     group: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await _uniq("warehouse", s, group_name=_v(group), region=_v(region))
@@ -124,7 +124,7 @@ async def get_categories(
     group: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
     warehouse: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await _uniq(
@@ -140,7 +140,7 @@ async def get_manufacturers(
     region: Optional[str] = Query(None),
     warehouse: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await _uniq(
@@ -158,7 +158,7 @@ async def get_brands(
     warehouse: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     manufacturer: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await _uniq(
@@ -182,7 +182,7 @@ async def search_supplies(
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         stmt = (
@@ -248,7 +248,7 @@ async def export_pdf(
     brand: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     detail: bool = Query(True),
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         if detail:

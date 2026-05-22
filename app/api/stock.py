@@ -38,7 +38,7 @@ from sqlalchemy import select, func
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
 from app.bot.handlers import uniq, FILTER_MAP   # переиспользуем готовую логику
-from app.db.models import AdminUser, Stock
+from app.db.models import User, Stock
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -82,7 +82,7 @@ def _apply_filters(stmt, group, region, warehouse, category, manufacturer, brand
 # ── Эндпоинты фильтров ─────────────────────────────────────────────────────────
 
 @router.get("/groups")
-async def get_groups(_: AdminUser = Depends(get_current_user)):
+async def get_groups(_: User = Depends(get_current_user)):
     """Список групп складов (верхний уровень фильтрации)."""
     async with AsyncSessionLocal() as s:
         values = await uniq("group_name", s)
@@ -92,7 +92,7 @@ async def get_groups(_: AdminUser = Depends(get_current_user)):
 @router.get("/regions")
 async def get_regions(
     group: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     """Список регионов (фильтруется по group)."""
     async with AsyncSessionLocal() as s:
@@ -104,7 +104,7 @@ async def get_regions(
 async def get_warehouses(
     group: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await uniq(
@@ -120,7 +120,7 @@ async def get_categories(
     group: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
     warehouse: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await uniq(
@@ -138,7 +138,7 @@ async def get_manufacturers(
     region: Optional[str] = Query(None),
     warehouse: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await uniq(
@@ -158,7 +158,7 @@ async def get_brands(
     warehouse: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     manufacturer: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await uniq(
@@ -180,7 +180,7 @@ async def get_nom_types(
     category: Optional[str] = Query(None),
     manufacturer: Optional[str] = Query(None),
     brand: Optional[str] = Query(None),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as s:
         values = await uniq(
@@ -210,7 +210,7 @@ async def search_stock(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     module: Optional[str] = Query(None),   # implants | implants_view
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Поиск остатков с пагинацией.
@@ -283,7 +283,7 @@ async def export_pdf(
     nom_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     module: Optional[str] = Query(None),   # implants | implants_view
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Генерирует PDF с результатами поиска и возвращает файл для скачивания.

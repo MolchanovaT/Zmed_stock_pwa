@@ -25,7 +25,7 @@ from sqlalchemy import select, delete
 
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
-from app.db.models import AdminUser, InnDiler, InnLpu, InnPending
+from app.db.models import User, InnDiler, InnLpu, InnPending
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/inn-check", tags=["inn-check"])
@@ -54,7 +54,7 @@ class PendingAddRequest(BaseModel):
 @router.post("/check", response_model=CheckResult)
 async def check_inn(
     body: CheckRequest,
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Проверяет ИНН контрагента.
@@ -98,21 +98,21 @@ async def check_inn(
 # ── Списки (чтение) ───────────────────────────────────────────────────────────
 
 @router.get("/dilers")
-async def get_dilers(_: AdminUser = Depends(get_current_user)):
+async def get_dilers(_: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(select(InnDiler).order_by(InnDiler.name))).scalars().all()
     return {"items": [{"id": r.id, "name": r.name, "inn": r.inn, "allowed": bool(r.allowed)} for r in rows]}
 
 
 @router.get("/lpu")
-async def get_lpu(_: AdminUser = Depends(get_current_user)):
+async def get_lpu(_: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(select(InnLpu).order_by(InnLpu.name))).scalars().all()
     return {"items": [{"id": r.id, "name": r.name, "inn": r.inn, "allowed": bool(r.allowed)} for r in rows]}
 
 
 @router.get("/pending")
-async def get_pending(_: AdminUser = Depends(get_current_user)):
+async def get_pending(_: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(select(InnPending).order_by(InnPending.date.desc()))).scalars().all()
     return {"items": [
@@ -127,7 +127,7 @@ async def get_pending(_: AdminUser = Depends(get_current_user)):
 @router.post("/pending/add")
 async def add_pending(
     body: PendingAddRequest,
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     """Добавляет новую заявку на рассмотрение."""
     async with AsyncSessionLocal() as s:
@@ -152,7 +152,7 @@ async def add_pending(
 async def upload_csv(
     table: str = Form(...),   # dilers | lpu | pending
     file: UploadFile = File(...),
-    _: AdminUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     """
     Загружает CSV и заменяет содержимое таблицы.

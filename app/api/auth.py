@@ -2,8 +2,9 @@
 app/api/auth.py
 
 JWT-авторизация для PWA.
-Аутентификация — по таблице AdminUser (username + password_hash).
-Доступ к боту контролируется AllowedUser (tg_id), для PWA используем AdminUser.
+Аутентификация — по единой таблице users (username + password_hash).
+Доступ разрешён только active=1 пользователям с непустым password_hash.
+Telegram-вход в бота — по tg_id, контролируется собственным middleware бота.
 
 Эндпоинты:
   POST /api/auth/login  — принимает form-data {username, password}, возвращает JWT
@@ -22,7 +23,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.api.activity import log_activity
-from app.db.models import AdminUser
+from app.db.models import User
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -55,8 +56,8 @@ def create_access_token(user_id: int) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> AdminUser:
-    """Dependency: декодирует JWT и возвращает AdminUser из БД."""
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+    """Dependency: декодирует JWT и возвращает User из БД."""
     exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Недействительный токен",
@@ -71,9 +72,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> AdminUser:
         raise exc
 
     async with AsyncSessionLocal() as session:
-        user = await session.get(AdminUser, int(user_id))
+        user = await session.get(User, int(user_id))
 
-    if user is None:
+    if user is None or not user.active:
         raise exc
     return user
 
@@ -88,11 +89,11 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
     """
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(AdminUser).where(AdminUser.username == form.username)
+            select(User).where(User.username == form.username)
         )
         user = result.scalars().first()
 
-    if not user or not user.check_password(form.password):
+    if not user or not user.active or not user.password_hash or not user.check_password(form.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный логин или пароль",
@@ -105,7 +106,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
 
 
 @router.get("/me", response_model=UserOut)
-async def get_me(current_user: AdminUser = Depends(get_current_user)):
+async def get_me(current_user: User = Depends(get_current_user)):
     """Возвращает данные авторизованного пользователя."""
     return {
         "id": current_user.id,
