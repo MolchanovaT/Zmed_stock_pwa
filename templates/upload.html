@@ -13,9 +13,13 @@
         .user-name             { font-weight: 600; line-height: 1.1; }
         .user-meta             { font-size: .75rem; color: #6c757d; line-height: 1.2; }
         .access-row            { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+        .access-row + .access-row { margin-top: 2px; }
         .access-row .form-check{ margin-bottom: 0; }
         .access-row .form-check-label { font-size: .8rem; }
-        .access-flags          { display: flex; gap: 14px; align-items: center; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #dee2e6; }
+        .access-row .group-tag { min-width: 36px; font-weight: 600; color: #495057; }
+        .access-row.tg-row     { background: #f7fff5; padding: 2px 6px; border-radius: 4px; }
+        .access-row.pwa-row    { background: #f5faff; padding: 2px 6px; border-radius: 4px; }
+        .access-flags          { display: flex; gap: 14px; align-items: center; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #dee2e6; }
         .actions-row           { display: inline-flex; gap: 4px; flex-wrap: wrap; }
         .actions-row form      { display: inline; }
         .actions-row .btn      { padding: .125rem .35rem; font-size: .75rem; }
@@ -84,7 +88,7 @@
         </td>
         <td>
             <form action="{{ url_for('user_save', user_id=u.id) }}" method="post" class="m-0">
-                <div class="access-row">
+                <div class="access-row pwa-row">
                     <span class="group-tag">PWA</span>
                     {% for mod_id, mod_label in pwa_modules %}
                     <div class="form-check form-check-inline">
@@ -94,7 +98,9 @@
                         <label class="form-check-label" for="mod_{{ u.id }}_{{ mod_id }}">{{ mod_label }}</label>
                     </div>
                     {% endfor %}
-                    <span class="group-tag ms-2">TG</span>
+                </div>
+                <div class="access-row tg-row">
+                    <span class="group-tag">TG</span>
                     {% for mod_id, mod_label in bot_modules %}
                     <div class="form-check form-check-inline">
                         <input class="form-check-input" type="checkbox"
@@ -109,7 +115,7 @@
                         <input class="form-check-input" type="checkbox"
                                name="is_superuser" id="super_{{ u.id }}"
                                {% if u.is_superuser %}checked{% endif %}>
-                        <label class="form-check-label" for="super_{{ u.id }}">🔑 Супер</label>
+                        <label class="form-check-label" for="super_{{ u.id }}">🔑 Админ</label>
                     </div>
                     <div class="form-check form-check-inline">
                         <input class="form-check-input" type="checkbox"
@@ -233,7 +239,7 @@
         <div class="d-flex gap-3 mt-3 align-items-center">
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" name="is_superuser" id="new_super">
-                <label class="form-check-label small" for="new_super">🔑 Суперпользователь</label>
+                <label class="form-check-label small" for="new_super">🔑 Админ</label>
             </div>
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" name="active" id="new_active" value="1" checked>

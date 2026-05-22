@@ -82,7 +82,7 @@ def gate_admin_by_superuser():
 @app.errorhandler(403)
 def forbidden(_):
     return ("403 Доступ запрещён. "
-            "Эта страница доступна только суперпользователям.", 403)
+            "Эта страница доступна только админам.", 403)
 
 
 # ─────────────────────────────
@@ -96,7 +96,7 @@ def login():
         user = db_session.query(User).filter_by(username=username).first()
         if user and user.active and user.check_password(password):
             if not user.is_superuser:
-                flash("❌ Доступ к админ-панели только у суперпользователей. "
+                flash("❌ Доступ к админ-панели только у админов. "
                       "Обычным пользователям — основной сайт PWA.", "error")
                 return redirect("/login")
             login_user(user)
@@ -468,7 +468,7 @@ def user_save(user_id: int):
     new_active = 1 if request.form.get("active") else 0
 
     if current_user.id == user_id and (not new_super or not new_active):
-        flash("Нельзя снять с себя is_superuser или active.", "error")
+        flash("Нельзя снять с себя права админа или активность.", "error")
         return redirect(url_for("upload_file"))
 
     u.is_superuser = new_super
