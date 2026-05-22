@@ -83,6 +83,52 @@ class AllowedUser(Base):
     title = Column(String, nullable=True)
 
 
+class User(Base, UserMixin):
+    """Единая таблица пользователей: PWA-сайт + Telegram-боты.
+
+    username/password_hash — заполнены у людей с логином в PWA (React-PWA :8000
+    и/или Flask-админка :5102).
+    tg_id/full_name/title — заполнены у людей, которым выдан доступ к боту.
+    Если заполнено и то, и то — один физический человек с двумя видами входа.
+
+    modules: JSON-список разрешённых разделов.
+        PWA-сайт: implants, implants_view, supplies, inn_check
+        Боты:     bot_supplies, bot_implants
+
+    is_superuser=1 нужен для входа в Flask-админку и страницу управления
+    пользователями. Обычные PWA-юзеры ходят только в React на :8000.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=True)
+    password_hash = Column(String, nullable=True)
+    tg_id = Column(BigInteger, unique=True, index=True, nullable=True)
+    full_name = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    modules = Column(String, nullable=True)
+    is_superuser = Column(Integer, nullable=False, default=0)
+    active = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+
+    def get_modules(self) -> list[str]:
+        if not self.modules:
+            return []
+        try:
+            return json.loads(self.modules)
+        except (ValueError, TypeError):
+            return []
+
+
 class Cart(Base):
     __tablename__ = "carts"
 
