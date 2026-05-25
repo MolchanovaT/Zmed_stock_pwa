@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, redirect, flash, url_for
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from dotenv import load_dotenv
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from app.db.base import Base
 from app.db.session import db_session
@@ -18,6 +18,7 @@ from functools import wraps
 from flask import abort
 
 from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending
+from app.db.models_stats import TgUser, Interaction  # noqa: F401  -- регистрируем модели в Base.metadata
 from app.tools.import_supplies import load_supplies_file
 
 # ─────────────────────────────
@@ -743,6 +744,194 @@ def stats():
             "user_id":   user_id,
             "action":    action_filter,
             "module":    module_filter,
+        },
+    )
+
+
+BOT_LABELS = {
+    "stockbot2":          "Расходники",
+    "stockbot2_implants": "Импланты",
+    "flask_bot_app":      "ИНН",
+}
+BOT_COLORS = {
+    "stockbot2":          "success",
+    "stockbot2_implants": "primary",
+    "flask_bot_app":      "secondary",
+}
+KIND_LABELS = {
+    "start":    "🚀 /start",
+    "command":  "⚙️ команда",
+    "message":  "💬 сообщение",
+    "callback": "🔘 кнопка",
+}
+KIND_COLORS = {
+    "start":    "success",
+    "command":  "info",
+    "message":  "primary",
+    "callback": "warning",
+}
+PIVOT_KINDS = ["start", "command", "message", "callback"]
+
+
+@app.route("/tg-stats")
+@login_required
+def tg_stats():
+    date_from_str = request.args.get("date_from", "")
+    date_to_str   = request.args.get("date_to", "")
+    bot_filter    = request.args.get("bot_name", "")
+    tg_id_filter  = request.args.get("tg_id", type=int)
+
+    today = datetime.utcnow().date()
+    period_set = bool(date_from_str or date_to_str)
+
+    where = []
+    params = {}
+    if date_from_str:
+        where.append("i.created_at >= :df")
+        params["df"] = datetime.strptime(date_from_str, "%Y-%m-%d")
+    if date_to_str:
+        where.append("i.created_at < :dt")
+        params["dt"] = datetime.strptime(date_to_str, "%Y-%m-%d") + timedelta(days=1)
+    elif not period_set:
+        where.append("i.created_at >= :today")
+        params["today"] = datetime.combine(today, datetime.min.time())
+    if bot_filter:
+        where.append("i.bot_name = :bn")
+        params["bn"] = bot_filter
+    if tg_id_filter:
+        where.append("i.user_id = :tg")
+        params["tg"] = tg_id_filter
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    # ── Сводная 1: боты × типы событий ────────────────────────────────────
+    pivot_rows = db_session.execute(text(f"""
+        SELECT i.bot_name, i.kind, COUNT(*) AS cnt
+        FROM tg_interactions i
+        {where_sql}
+        GROUP BY i.bot_name, i.kind
+    """), params).all()
+    pivot: dict[str, dict[str, int]] = {}
+    for bn, kind, cnt in pivot_rows:
+        pivot.setdefault(bn, {})[kind] = cnt
+
+    # ── Сводная 2: топ-10 юзеров (с разбивкой по ботам) ───────────────────
+    top_rows = db_session.execute(text(f"""
+        SELECT i.user_id AS tg_id, i.bot_name, COUNT(*) AS cnt
+        FROM tg_interactions i
+        {where_sql}
+        GROUP BY i.user_id, i.bot_name
+    """), params).all()
+    by_user: dict[int, dict] = {}
+    for tg_id, bn, cnt in top_rows:
+        d = by_user.setdefault(tg_id, {"_total": 0})
+        d[bn] = cnt
+        d["_total"] += cnt
+    top_ids = sorted(by_user, key=lambda k: -by_user[k]["_total"])[:10]
+
+    name_map = {}
+    if top_ids:
+        placeholders = ",".join(f":id{i}" for i in range(len(top_ids)))
+        name_params = {f"id{i}": tg_id for i, tg_id in enumerate(top_ids)}
+        name_rows = db_session.execute(text(f"""
+            SELECT
+                tu.id AS tg_id,
+                COALESCE(
+                    u.full_name,
+                    NULLIF(TRIM(COALESCE(tu.first_name,'') || ' ' || COALESCE(tu.last_name,'')), ''),
+                    tu.username
+                ) AS display_name,
+                u.title AS title,
+                u.username AS pwa_username
+            FROM tg_users tu
+            LEFT JOIN users u ON u.tg_id = tu.id
+            WHERE tu.id IN ({placeholders})
+        """), name_params).all()
+        for tg_id, display_name, title, pwa_username in name_rows:
+            name_map[tg_id] = {
+                "display": display_name or f"tg:{tg_id}",
+                "title": title,
+                "pwa_username": pwa_username,
+            }
+
+    top_users = []
+    for tg_id in top_ids:
+        info = name_map.get(tg_id, {"display": f"tg:{tg_id}", "title": None, "pwa_username": None})
+        top_users.append({
+            "tg_id":         tg_id,
+            "display":       info["display"],
+            "title":         info["title"],
+            "pwa_username":  info["pwa_username"],
+            "counts":        {k: v for k, v in by_user[tg_id].items() if k != "_total"},
+            "total":         by_user[tg_id]["_total"],
+        })
+
+    # ── Журнал событий ────────────────────────────────────────────────────
+    journal_rows = db_session.execute(text(f"""
+        SELECT
+            i.id, i.created_at, i.bot_name, i.kind, i.payload,
+            i.user_id AS tg_id,
+            COALESCE(
+                u.full_name,
+                NULLIF(TRIM(COALESCE(tu.first_name,'') || ' ' || COALESCE(tu.last_name,'')), ''),
+                tu.username
+            ) AS display_name,
+            u.title AS title
+        FROM tg_interactions i
+        LEFT JOIN tg_users tu ON tu.id = i.user_id
+        LEFT JOIN users u ON u.tg_id = i.user_id
+        {where_sql}
+        ORDER BY i.created_at DESC
+        LIMIT 1000
+    """), params).all()
+    interactions = [{
+        "id":           r.id,
+        "created_at":   r.created_at,
+        "bot_name":     r.bot_name,
+        "kind":         r.kind,
+        "payload":      r.payload,
+        "tg_id":        r.tg_id,
+        "display_name": r.display_name or f"tg:{r.tg_id}",
+        "title":        r.title,
+    } for r in journal_rows]
+
+    # Справочники для фильтров (по всей истории, не ограниченной фильтром)
+    all_bots = [r[0] for r in db_session.execute(
+        text("SELECT DISTINCT bot_name FROM tg_interactions ORDER BY bot_name")
+    ).all()]
+
+    all_users = db_session.execute(text("""
+        SELECT DISTINCT
+            i.user_id AS tg_id,
+            COALESCE(
+                u.full_name,
+                NULLIF(TRIM(COALESCE(tu.first_name,'') || ' ' || COALESCE(tu.last_name,'')), ''),
+                tu.username
+            ) AS display_name
+        FROM tg_interactions i
+        LEFT JOIN tg_users tu ON tu.id = i.user_id
+        LEFT JOIN users u ON u.tg_id = i.user_id
+        ORDER BY display_name
+    """)).all()
+    all_users = [(tg_id, display or f"tg:{tg_id}") for tg_id, display in all_users]
+
+    return render_template(
+        "tg_stats.html",
+        pivot=pivot,
+        pivot_kinds=PIVOT_KINDS,
+        top_users=top_users,
+        interactions=interactions,
+        all_bots=all_bots,
+        all_users=all_users,
+        bot_labels=BOT_LABELS,
+        bot_colors=BOT_COLORS,
+        kind_labels=KIND_LABELS,
+        kind_colors=KIND_COLORS,
+        period_set=period_set,
+        filters={
+            "date_from": date_from_str,
+            "date_to":   date_to_str,
+            "bot_name":  bot_filter,
+            "tg_id":     tg_id_filter or "",
         },
     )
 

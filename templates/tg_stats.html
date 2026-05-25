@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>TG-статистика — ZMed Admin</title>
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        .table td, .table th { vertical-align: middle; }
+        .count-zero { color: #ccc; }
+        .payload-cell {
+            max-width: 380px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: .8rem;
+            color: #555;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .user-row td { vertical-align: middle; }
+        .small-muted { font-size: .78rem; color: #888; }
+    </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark px-4 py-2 mb-4">
+    <span class="navbar-brand fw-bold">🏥 ZMed Admin</span>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('upload_file') }}" class="btn btn-sm btn-outline-light">← Главная</a>
+        <a href="{{ url_for('stats') }}" class="btn btn-sm btn-outline-light">📊 PWA-статистика</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-danger">Выйти</a>
+    </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+<h4 class="mb-4">📱 Статистика Telegram-ботов</h4>
+
+<!-- ── Фильтры ────────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-12 col-sm-6 col-md-2">
+                <label class="form-label text-muted small mb-1">С даты</label>
+                <input type="date" name="date_from" class="form-control form-control-sm"
+                       value="{{ filters.date_from }}">
+            </div>
+            <div class="col-12 col-sm-6 col-md-2">
+                <label class="form-label text-muted small mb-1">По дату</label>
+                <input type="date" name="date_to" class="form-control form-control-sm"
+                       value="{{ filters.date_to }}">
+            </div>
+            <div class="col-12 col-sm-6 col-md-2">
+                <label class="form-label text-muted small mb-1">Бот</label>
+                <select name="bot_name" class="form-select form-select-sm">
+                    <option value="">Все боты</option>
+                    {% for b in all_bots %}
+                    <option value="{{ b }}" {{ 'selected' if filters.bot_name == b }}>
+                        {{ bot_labels.get(b, b) }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <label class="form-label text-muted small mb-1">Пользователь</label>
+                <select name="tg_id" class="form-select form-select-sm">
+                    <option value="">Все пользователи</option>
+                    {% for tg_id, display in all_users %}
+                    <option value="{{ tg_id }}"
+                        {{ 'selected' if filters.tg_id == tg_id }}>{{ display }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">Применить</button>
+            </div>
+            <div class="col-auto">
+                <a href="{{ url_for('tg_stats') }}" class="btn btn-outline-secondary btn-sm">Сбросить</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── Сводная 1: боты × типы событий ───────────────────────────────── -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold bg-white">
+        {% if period_set %}
+            События по ботам —
+            <span class="text-muted fw-normal">
+                {{ filters.date_from or '…' }} — {{ filters.date_to or '…' }}
+            </span>
+        {% else %}
+            События по ботам — <span class="text-muted fw-normal">сегодня</span>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th>Бот</th>
+                {% for k in pivot_kinds %}
+                <th class="text-center">{{ kind_labels[k] }}</th>
+                {% endfor %}
+                <th class="text-center fw-bold">Итого</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% set grand = namespace(by_kind={}, total=0) %}
+            {% for k in pivot_kinds %}{% set _ = grand.by_kind.update({k: 0}) %}{% endfor %}
+            {% for bn in all_bots %}
+            {% set row = pivot.get(bn, {}) %}
+            {% set total = row.values() | sum %}
+            <tr>
+                <td>
+                    <span class="badge bg-{{ bot_colors.get(bn, 'secondary') }} bg-opacity-75">
+                        {{ bot_labels.get(bn, bn) }}
+                    </span>
+                    <span class="small-muted ms-1">{{ bn }}</span>
+                </td>
+                {% for k in pivot_kinds %}
+                {% set cnt = row.get(k, 0) %}
+                <td class="text-center">
+                    {% if cnt %}<span class="fw-semibold">{{ cnt }}</span>
+                    {% else %}<span class="count-zero">—</span>{% endif %}
+                </td>
+                {% set _ = grand.by_kind.update({k: grand.by_kind[k] + cnt}) %}
+                {% endfor %}
+                <td class="text-center fw-bold">{{ total if total else '—' }}</td>
+                {% set grand.total = grand.total + total %}
+            </tr>
+            {% endfor %}
+            <tr class="table-light fw-semibold">
+                <td>Итого</td>
+                {% for k in pivot_kinds %}
+                <td class="text-center">{{ grand.by_kind[k] if grand.by_kind[k] else '—' }}</td>
+                {% endfor %}
+                <td class="text-center fw-bold">{{ grand.total if grand.total else '—' }}</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Сводная 2: топ-10 пользователей ──────────────────────────────── -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold bg-white">
+        Топ-10 пользователей по активности
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th>#</th>
+                <th>Пользователь</th>
+                <th>Должность</th>
+                {% for bn in all_bots %}
+                <th class="text-center">{{ bot_labels.get(bn, bn) }}</th>
+                {% endfor %}
+                <th class="text-center fw-bold">Всего</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for u in top_users %}
+            <tr class="user-row">
+                <td class="text-muted">{{ loop.index }}</td>
+                <td>
+                    {{ u.display }}
+                    {% if u.pwa_username %}
+                    <span class="small-muted">({{ u.pwa_username }})</span>
+                    {% endif %}
+                    <div class="small-muted">tg:{{ u.tg_id }}</div>
+                </td>
+                <td class="small text-muted">{{ u.title or '—' }}</td>
+                {% for bn in all_bots %}
+                {% set cnt = u.counts.get(bn, 0) %}
+                <td class="text-center">
+                    {% if cnt %}{{ cnt }}{% else %}<span class="count-zero">—</span>{% endif %}
+                </td>
+                {% endfor %}
+                <td class="text-center fw-bold">{{ u.total }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="{{ 4 + all_bots | length }}" class="text-center text-muted py-4">
+                    Нет данных за выбранный период
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Журнал событий ───────────────────────────────────────────────── -->
+<div class="card shadow-sm" id="log">
+    <div class="card-header fw-semibold bg-white d-flex align-items-center gap-3">
+        <span>Журнал событий</span>
+        <span class="text-muted small fw-normal ms-auto">{{ interactions | length }} записей</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-dark">
+                <tr>
+                    <th style="width:155px">Дата и время</th>
+                    <th style="width:130px">Бот</th>
+                    <th style="width:200px">Пользователь</th>
+                    <th style="width:130px">Тип</th>
+                    <th>Сообщение</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for i in interactions %}
+                <tr>
+                    <td class="text-nowrap text-muted small">
+                        {{ i.created_at.strftime('%d.%m.%Y %H:%M:%S') if i.created_at else '—' }}
+                    </td>
+                    <td>
+                        <span class="badge bg-{{ bot_colors.get(i.bot_name, 'secondary') }} bg-opacity-75">
+                            {{ bot_labels.get(i.bot_name, i.bot_name) }}
+                        </span>
+                    </td>
+                    <td class="small">
+                        {{ i.display_name }}
+                        {% if i.title %}<span class="small-muted">— {{ i.title }}</span>{% endif %}
+                        <div class="small-muted">tg:{{ i.tg_id }}</div>
+                    </td>
+                    <td>
+                        <span class="badge bg-{{ kind_colors.get(i.kind, 'secondary') }}">
+                            {{ kind_labels.get(i.kind, i.kind) }}
+                        </span>
+                    </td>
+                    <td class="payload-cell" title="{{ i.payload or '' }}">{{ i.payload or '' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-5">
+                        Нет данных за выбранный период
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% if interactions | length >= 1000 %}
+    <div class="card-footer text-muted small">
+        Показаны первые 1000 записей по фильтру. Уточните период или бота/пользователя.
+    </div>
+    {% endif %}
+</div>
+
+</div>
+<div class="mb-5"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
