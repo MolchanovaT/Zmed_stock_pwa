@@ -883,9 +883,17 @@ def tg_stats():
         ORDER BY i.created_at DESC
         LIMIT 1000
     """), params).all()
+    def _parse_dt(v):
+        if v is None or isinstance(v, datetime):
+            return v
+        try:
+            return datetime.fromisoformat(v)
+        except (ValueError, TypeError):
+            return None
+
     interactions = [{
         "id":           r.id,
-        "created_at":   r.created_at,
+        "created_at":   _parse_dt(r.created_at),
         "bot_name":     r.bot_name,
         "kind":         r.kind,
         "payload":      r.payload,
