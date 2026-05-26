@@ -782,6 +782,9 @@ def tg_stats():
     tg_id_filter  = request.args.get("tg_id", type=int)
 
     today = datetime.utcnow().date()
+    if not (date_from_str or date_to_str):
+        date_from_str = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+        date_to_str = today.strftime("%Y-%m-%d")
     period_set = bool(date_from_str or date_to_str)
 
     where = []
@@ -792,9 +795,6 @@ def tg_stats():
     if date_to_str:
         where.append("i.created_at < :dt")
         params["dt"] = datetime.strptime(date_to_str, "%Y-%m-%d") + timedelta(days=1)
-    elif not period_set:
-        where.append("i.created_at >= :today")
-        params["today"] = datetime.combine(today, datetime.min.time())
     if bot_filter:
         where.append("i.bot_name = :bn")
         params["bn"] = bot_filter
