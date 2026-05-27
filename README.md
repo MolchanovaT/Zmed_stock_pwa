@@ -7,4 +7,4 @@ Telegram-бот для просмотра остатков оборудован�
 cp .env.example .env
 pip install -r requirements.txt
 python app/tools/import_csv.py stock.csv        # загрузите свой CSV
-python -m app.bot.main
+python admin_app.py

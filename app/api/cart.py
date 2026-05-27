@@ -2,7 +2,7 @@
 app/api/cart.py
 
 REST-эндпоинты для работы с корзиной и оформления заказа.
-Email-уведомление переиспользует send_order_notification из app.bot.handlers.
+Email-уведомление через send_order_notification из app.api.email.
 
 Эндпоинты:
   GET    /api/cart                — активная корзина пользователя
@@ -22,7 +22,7 @@ from sqlalchemy import select, delete
 
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
-from app.bot.handlers import send_order_notification  # переиспользуем логику email
+from app.api.email import send_order_notification
 from app.db.models import User, Cart, CartItem
 from app.db.session import AsyncSessionLocal
 

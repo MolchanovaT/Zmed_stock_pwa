@@ -11,4 +11,4 @@ COPY . .
 # Flask-админка слушает 5101
 EXPOSE 5101
 
-CMD ["sh", "-c", "python admin_app.py & python -m app.bot.main"]
+CMD ["python", "admin_app.py"]

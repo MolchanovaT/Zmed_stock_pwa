@@ -2,8 +2,7 @@
 app/api/stock.py
 
 REST-эндпоинты для работы с остатками.
-Логика фильтрации переиспользует функцию uniq() из app.bot.handlers.
-PDF генерируется той же логикой, что и в handlers.download_pdf.
+Логика фильтрации — функция uniq() из app.api.stock_logic.
 
 Эндпоинты:
   GET /api/stock/groups
@@ -37,7 +36,7 @@ from sqlalchemy import select, func
 
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
-from app.bot.handlers import uniq, FILTER_MAP   # переиспользуем готовую логику
+from app.api.stock_logic import uniq, FILTER_MAP
 from app.db.models import User, Stock
 from app.db.session import AsyncSessionLocal
 
