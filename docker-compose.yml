@@ -40,6 +40,8 @@ services:
     build: .
     container_name: pwa_bot_inn
     command: python -m app.bot_inn.main
+    environment:
+      PYTHONUNBUFFERED: "1"
     volumes:
       - ./app:/app/app
       - ./data:/app/data
