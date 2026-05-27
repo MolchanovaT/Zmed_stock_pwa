@@ -32,7 +32,10 @@ async def main():
 
     dp.include_router(r)
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        pass
     await dp.start_polling(bot)
 
 
