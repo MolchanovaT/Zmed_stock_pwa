@@ -31,7 +31,8 @@ else:
 # ────────────────────────────────────────────────────────────────
 # Telegram-бот
 
-BOT_TOKEN: str | None = os.getenv("BOT_TOKEN")           # обязателен
+BOT_TOKEN: str | None = os.getenv("BOT_TOKEN")           # legacy, удалить в G4
+BOT_TOKEN_INN: str | None = os.getenv("BOT_TOKEN_INN")
 
 # ────────────────────────────────────────────────────────────────
 # База данных

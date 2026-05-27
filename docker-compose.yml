@@ -35,3 +35,13 @@ services:
       - ./frontend/dist:/app/frontend/dist   # собранный фронтенд
     env_file: .env
     restart: always
+
+  bot_inn:
+    build: .
+    container_name: pwa_bot_inn
+    command: python -m app.bot_inn.main
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    env_file: .env
+    restart: always
