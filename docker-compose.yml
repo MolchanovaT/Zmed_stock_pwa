@@ -59,3 +59,15 @@ services:
       - ./data:/app/data
     env_file: .env
     restart: always
+
+  bot_implants:
+    build: .
+    container_name: pwa_bot_implants
+    command: python -m app.bot_implants.main
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    env_file: .env
+    restart: always

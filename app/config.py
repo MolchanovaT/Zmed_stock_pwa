@@ -34,6 +34,7 @@ else:
 BOT_TOKEN: str | None = os.getenv("BOT_TOKEN")           # legacy, удалить в G4
 BOT_TOKEN_INN: str | None = os.getenv("BOT_TOKEN_INN")
 BOT_TOKEN_SUPPLIES: str | None = os.getenv("BOT_TOKEN_SUPPLIES")
+BOT_TOKEN_IMPLANTS: str | None = os.getenv("BOT_TOKEN_IMPLANTS")
 
 # ────────────────────────────────────────────────────────────────
 # База данных
