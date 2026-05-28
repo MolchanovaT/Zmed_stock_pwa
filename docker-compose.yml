@@ -47,3 +47,15 @@ services:
       - ./data:/app/data
     env_file: .env
     restart: always
+
+  bot_supplies:
+    build: .
+    container_name: pwa_bot_supplies
+    command: python -m app.bot_supplies.main
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    env_file: .env
+    restart: always
