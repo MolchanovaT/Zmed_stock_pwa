@@ -60,7 +60,7 @@ services:
     env_file: .env
     restart: always
 
-  bot_implants:
+  bot_implants_search:
     build: .
     container_name: pwa_bot_implants
     command: python -m app.bot_implants.main
