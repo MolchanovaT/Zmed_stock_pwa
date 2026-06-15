@@ -7,8 +7,9 @@
  *   page        — текущая страница (controlled)
  *   onPageChange(n) — смена страницы
  *   onAddToCart(item) — добавить строку в корзину
+ *   isAdded(item)     — позиция уже в корзине (меняет цвет кнопки)
  */
-export default function StockTable({ result, loading, page, onPageChange, onAddToCart }) {
+export default function StockTable({ result, loading, page, onPageChange, onAddToCart, isAdded }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
@@ -70,11 +71,13 @@ export default function StockTable({ result, loading, page, onPageChange, onAddT
             {onAddToCart && (
               <button
                 onClick={() => onAddToCart(item)}
-                className="shrink-0 bg-brand-500 hover:bg-brand-600 active:bg-brand-700
-                           text-white text-xs font-semibold
-                           px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
+                className={`shrink-0 text-white text-xs font-semibold
+                            px-3 py-2 rounded-lg transition-colors whitespace-nowrap
+                            ${isAdded?.(item)
+                              ? 'bg-green-500 hover:bg-green-600 active:bg-green-700'
+                              : 'bg-brand-500 hover:bg-brand-600 active:bg-brand-700'}`}
               >
-                + В корзину
+                {isAdded?.(item) ? '✓ В корзине' : '+ В корзину'}
               </button>
             )}
           </div>

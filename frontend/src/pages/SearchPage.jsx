@@ -19,9 +19,18 @@ export default function SearchPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)  // мобильный сайдбар
   const [toast, setToast] = useState('')
   const [cartCount, setCartCount] = useState(0)
+  const [addedKeys, setAddedKeys] = useState(() => new Set())
+
+  const itemKey = (article, characteristic, lpu) =>
+    `${article || ''}|${characteristic || ''}|${lpu || ''}`
 
   useEffect(() => {
-    getCart().then((cart) => setCartCount(cart?.items?.length ?? 0)).catch(() => {})
+    getCart().then((cart) => {
+      setCartCount(cart?.items?.length ?? 0)
+      if (cart?.items?.length) {
+        setAddedKeys(new Set(cart.items.map((ci) => itemKey(ci.article, ci.characteristic, ci.lpu))))
+      }
+    }).catch(() => {})
   }, [])
 
   // ── Выполняем поиск при изменении фильтров/страницы ────────────────────────
@@ -89,6 +98,11 @@ export default function SearchPage() {
         lpu: warehouse,
       })
       setCartCount((n) => n + 1)
+      setAddedKeys((s) => {
+        const next = new Set(s)
+        next.add(itemKey(item.article, item.characteristic, warehouse))
+        return next
+      })
       showToast(`✅ Добавлено: ${item.nomenclature.slice(0, 30)}...`)
     } catch {
       showToast('❌ Ошибка добавления в корзину')
@@ -217,6 +231,11 @@ export default function SearchPage() {
               page={page}
               onPageChange={handlePageChange}
               onAddToCart={handleAddToCart}
+              isAdded={(item) => addedKeys.has(itemKey(
+                item.article,
+                item.characteristic,
+                filters.warehouse && filters.warehouse !== 'все' ? filters.warehouse : ''
+              ))}
             />
           </div>
         </main>
