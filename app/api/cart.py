@@ -37,7 +37,7 @@ class CartItemIn(BaseModel):
     characteristic: str = ""
     quantity: int = Field(1, ge=1)
     available_balance: float = 0.0
-    lpu: Optional[str] = None          # ЛПУ для новой корзины
+    lpu: Optional[str] = None          # склад-источник (фиксируется на первой позиции)
 
 
 class QuantityPatch(BaseModel):
@@ -45,11 +45,12 @@ class QuantityPatch(BaseModel):
 
 
 class OrderIn(BaseModel):
-    lpu: str                           # ЛПУ (учреждение)
+    lpu: str                           # ЛПУ-получатель (куда везём)
     delivery_date: str                 # формат ДД.ММ.ГГГГ
-    delivery_time: str                 # формат ЧЧ:ММ
+    delivery_time: str                 # слот или произвольный диапазон, напр. "07:00-08:30"
     doctor: str
     instrument: str = "нет"           # "да" | "нет"
+    comment: str = ""                  # свободный комментарий
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -58,12 +59,14 @@ def _serialize_cart(cart: Cart, items: list[CartItem]) -> dict:
     return {
         "id": cart.id,
         "lpu": cart.lpu,
+        "source_lpu": cart.source_lpu,
         "status": cart.status,
         "created_at": cart.created_at.isoformat() if cart.created_at else None,
         "delivery_date": cart.delivery_date,
         "delivery_time": cart.delivery_time,
         "doctor": cart.doctor,
         "instrument": cart.instrument,
+        "comment": cart.comment,
         "items": [
             {
                 "id": it.id,
@@ -118,7 +121,9 @@ async def add_cart_item(
         if cart is None:
             cart = Cart(
                 tg_user_id=current_user.id,
-                lpu=body.lpu or "",
+                # lpu (получатель) выберется на этапе оформления заказа.
+                # source_lpu (источник) фиксируем здесь — потом не меняем.
+                source_lpu=(body.lpu or "").strip() or None,
                 status="active",
             )
             s.add(cart)
@@ -254,7 +259,18 @@ async def place_order(
             raise HTTPException(status_code=400, detail="Корзина пуста")
 
         cart_id_val = cart.id
-        cart_lpu = body.lpu.strip() or cart.lpu or "не указано"
+        cart_lpu = body.lpu.strip() or "не указано"
+        source_lpu = (cart.source_lpu or "").strip()
+
+        # Получатель не должен совпадать со складом-источником.
+        # Проверка только если оба известны — старые корзины без source_lpu пропускаем.
+        if source_lpu and cart_lpu.lower() == source_lpu.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Склад-получатель должен отличаться от склада-источника",
+            )
+
+        comment_val = (body.comment or "").strip() or None
         items_snapshot = [
             (it.article, it.nomenclature, it.characteristic, it.quantity, int(it.available_balance or 0))
             for it in items
@@ -265,6 +281,7 @@ async def place_order(
         cart.delivery_time = body.delivery_time
         cart.doctor = body.doctor
         cart.instrument = body.instrument
+        cart.comment = comment_val
         cart.status = "submitted"
         s.add(cart)
         await s.commit()
@@ -286,6 +303,8 @@ async def place_order(
         delivery_time=body.delivery_time,
         doctor=body.doctor,
         instrument=body.instrument,
+        source_lpu=source_lpu or "не указано",
+        comment=comment_val or "",
     ))
 
     asyncio.create_task(log_activity(

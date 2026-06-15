@@ -1,8 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getLpuList } from '../api/stock'
 import SearchableSelect from './SearchableSelect'
 
 const MANUAL_LABEL = '✏️ Ввести вручную'
+const CUSTOM_SLOT = '__custom__'
+
+const TIME_SLOT_GROUPS = [
+  { label: 'Утро',  slots: ['07:00-08:30', '08:30-10:00', '10:00-11:00'] },
+  { label: 'День',  slots: ['11:00-12:00', '12:00-13:00', '13:00-14:00'] },
+  { label: 'Вечер', slots: ['14:00-15:00', '15:00-16:00', '16:00-17:00'] },
+]
 
 // Конвертация YYYY-MM-DD → ДД.ММ.ГГГГ для отправки на бэкенд
 function toRuDate(isoDate) {
@@ -15,48 +22,66 @@ function toRuDate(isoDate) {
  * Форма оформления заказа.
  *
  * Props:
- *   onSubmit({ lpu, delivery_date, delivery_time, doctor, instrument }) — callback
- *   submitting — boolean, блокирует форму во время отправки
+ *   onSubmit({ lpu, delivery_date, delivery_time, doctor, instrument, comment }) — callback
+ *   submitting — boolean
+ *   sourceLpu  — склад-источник (исключается из списка получателей)
+ *   regionContext — регион поиска (фильтрует список складов)
  */
-export default function OrderForm({ onSubmit, submitting, initialLpu = '', regionContext = '' }) {
+export default function OrderForm({ onSubmit, submitting, sourceLpu = '', regionContext = '' }) {
   const [form, setForm] = useState({
     lpu: '',
     lpu_manual: '',
     delivery_date: '',
-    delivery_time: '',
+    time_slot: '',          // один из пресетов или CUSTOM_SLOT
+    time_custom_from: '',   // HH:MM, только при CUSTOM_SLOT
+    time_custom_to: '',     // HH:MM, только при CUSTOM_SLOT
     doctor: '',
     instrument: 'нет',
+    comment: '',
   })
   const [errors, setErrors] = useState({})
   const [lpuList, setLpuList] = useState([])
   const [lpuLoading, setLpuLoading] = useState(true)
 
   useEffect(() => {
-    getLpuList(regionContext).then((items) => {
-      setLpuList(items)
-      if (initialLpu) {
-        if (items.includes(initialLpu)) {
-          setForm((f) => ({ ...f, lpu: initialLpu }))
-        } else {
-          setForm((f) => ({ ...f, lpu: '__manual__', lpu_manual: initialLpu }))
-        }
-      }
-    }).finally(() => setLpuLoading(false))
-  }, [initialLpu, regionContext])
+    getLpuList(regionContext)
+      .then(setLpuList)
+      .finally(() => setLpuLoading(false))
+  }, [regionContext])
+
+  // Список получателей = все склады минус источник (case-insensitive)
+  const recipientOptions = useMemo(() => {
+    const src = (sourceLpu || '').trim().toLowerCase()
+    const filtered = src
+      ? lpuList.filter((it) => (it || '').trim().toLowerCase() !== src)
+      : lpuList
+    return [...filtered, MANUAL_LABEL]
+  }, [lpuList, sourceLpu])
 
   const isManual = form.lpu === '__manual__'
+  const isCustomTime = form.time_slot === CUSTOM_SLOT
   const effectiveLpu = isManual ? form.lpu_manual.trim() : form.lpu
+
+  const effectiveTime = isCustomTime
+    ? (form.time_custom_from && form.time_custom_to
+        ? `${form.time_custom_from}-${form.time_custom_to}`
+        : '')
+    : form.time_slot
 
   const validate = () => {
     const e = {}
-    if (!effectiveLpu)
-      e.lpu = 'Укажите ЛПУ'
-    if (!form.delivery_date)
-      e.delivery_date = 'Укажите дату доставки'
-    if (!/^\d{2}:\d{2}$/.test(form.delivery_time))
-      e.delivery_time = 'Введите время в формате ЧЧ:ММ'
-    if (!form.doctor.trim())
-      e.doctor = 'Укажите врача'
+    if (!effectiveLpu) e.lpu = 'Укажите ЛПУ-получатель'
+    else if (sourceLpu && effectiveLpu.trim().toLowerCase() === sourceLpu.trim().toLowerCase())
+      e.lpu = 'Получатель должен отличаться от склада отбора'
+    if (!form.delivery_date) e.delivery_date = 'Укажите дату доставки'
+    if (!form.time_slot) e.delivery_time = 'Выберите время доставки'
+    else if (isCustomTime) {
+      if (!/^\d{2}:\d{2}$/.test(form.time_custom_from) || !/^\d{2}:\d{2}$/.test(form.time_custom_to))
+        e.delivery_time = 'Укажите время "с" и "до" в формате ЧЧ:ММ'
+      else if (form.time_custom_from >= form.time_custom_to)
+        e.delivery_time = 'Время "до" должно быть позже времени "с"'
+    }
+    if (!form.doctor.trim()) e.doctor = 'Укажите врача'
     return e
   }
 
@@ -71,9 +96,10 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
     onSubmit({
       lpu: effectiveLpu,
       delivery_date: toRuDate(form.delivery_date),
-      delivery_time: form.delivery_time,
+      delivery_time: effectiveTime,
       doctor: form.doctor.trim(),
       instrument: form.instrument,
+      comment: form.comment.trim(),
     })
   }
 
@@ -82,23 +108,49 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
      focus:outline-none focus:ring-2 focus:ring-brand-500
      ${errors[name] ? 'border-red-400' : 'border-gray-300'}`
 
+  const slotChip = (slot, label) => {
+    const active = form.time_slot === slot
+    return (
+      <button
+        key={slot}
+        type="button"
+        onClick={() => setForm((f) => ({ ...f, time_slot: slot }))}
+        disabled={submitting}
+        className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors
+          ${active
+            ? 'bg-brand-500 text-white border-brand-500'
+            : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400'}`}
+      >
+        {label}
+      </button>
+    )
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <h3 className="font-bold text-brand-600 text-sm uppercase tracking-wide">
         Оформление заказа
       </h3>
 
-      {/* Контекст региона — если склад не был выбран конкретно */}
-      {regionContext && !initialLpu && (
+      {/* Контекст: склад отбора и регион */}
+      {sourceLpu && (
+        <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800">
+          🏭 Склад отбора: <span className="font-semibold">{sourceLpu}</span>
+          <span className="block mt-0.5 text-amber-700/80">
+            Получатель не может совпадать с этим складом.
+          </span>
+        </div>
+      )}
+      {regionContext && !sourceLpu && (
         <div className="bg-blue-50 border border-blue-100 rounded-md px-3 py-2 text-xs text-blue-700">
           Регион поиска: <span className="font-semibold">{regionContext}</span> — уточните ЛПУ ниже
         </div>
       )}
 
-      {/* ЛПУ — выпадающий список */}
+      {/* ЛПУ-получатель */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
-          ЛПУ{initialLpu && <span className="ml-1 normal-case font-normal text-green-600">(подставлено из фильтра)</span>}
+          ЛПУ-получатель
         </label>
         <SearchableSelect
           value={form.lpu === '__manual__' ? MANUAL_LABEL : form.lpu}
@@ -107,7 +159,7 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
             lpu: v === MANUAL_LABEL ? '__manual__' : v,
             lpu_manual: '',
           }))}
-          options={[...lpuList, MANUAL_LABEL]}
+          options={recipientOptions}
           disabled={submitting}
           isLoading={lpuLoading}
           accent="brand"
@@ -133,7 +185,7 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
         </div>
       )}
 
-      {/* Дата доставки — нативный календарь */}
+      {/* Дата доставки */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
           Дата доставки
@@ -151,27 +203,50 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
         )}
       </div>
 
-      {/* Время доставки — текстовое поле с маской ЧЧ:ММ */}
+      {/* Время доставки — слоты */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
           Время доставки
         </label>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={form.delivery_time}
-          onChange={(e) => {
-            const digits = e.target.value.replace(/\D/g, '').slice(0, 4)
-            const masked = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits
-            setForm((f) => ({ ...f, delivery_time: masked }))
-          }}
-          placeholder="10:00"
-          maxLength={5}
-          disabled={submitting}
-          className={inputClass('delivery_time')}
-        />
+        <div className="space-y-2">
+          {TIME_SLOT_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="text-[11px] text-gray-400 mb-1">{group.label}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {group.slots.map((s) => slotChip(s, s.replace('-', ' – ')))}
+              </div>
+            </div>
+          ))}
+          <div>
+            <div className="flex flex-wrap gap-1.5">
+              {slotChip(CUSTOM_SLOT, '⏱ В течение дня')}
+            </div>
+            {isCustomTime && (
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                <span className="text-gray-500">с</span>
+                <input
+                  type="time"
+                  value={form.time_custom_from}
+                  onChange={(e) => setForm((f) => ({ ...f, time_custom_from: e.target.value }))}
+                  disabled={submitting}
+                  className="border border-gray-300 rounded-md px-2 py-1.5 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <span className="text-gray-500">до</span>
+                <input
+                  type="time"
+                  value={form.time_custom_to}
+                  onChange={(e) => setForm((f) => ({ ...f, time_custom_to: e.target.value }))}
+                  disabled={submitting}
+                  className="border border-gray-300 rounded-md px-2 py-1.5 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+            )}
+          </div>
+        </div>
         {errors.delivery_time && (
-          <p className="text-xs text-red-500 mt-0.5">{errors.delivery_time}</p>
+          <p className="text-xs text-red-500 mt-1">{errors.delivery_time}</p>
         )}
       </div>
 
@@ -191,7 +266,7 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
         {errors.doctor && <p className="text-xs text-red-500 mt-0.5">{errors.doctor}</p>}
       </div>
 
-      {/* Инструмент — переключатель */}
+      {/* Инструмент */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
           Нужен инструмент?
@@ -212,6 +287,22 @@ export default function OrderForm({ onSubmit, submitting, initialLpu = '', regio
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Комментарии */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
+          Комментарии <span className="normal-case font-normal text-gray-400">(необязательно)</span>
+        </label>
+        <textarea
+          value={form.comment}
+          onChange={(e) => setForm((f) => ({ ...f, comment: e.target.value }))}
+          placeholder="Особые пожелания, уточнения по доставке, и т.п."
+          rows={3}
+          disabled={submitting}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm
+                     focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y"
+        />
       </div>
 
       <button

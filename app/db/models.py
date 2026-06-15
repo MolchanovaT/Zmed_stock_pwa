@@ -134,13 +134,18 @@ class Cart(Base):
 
     id = Column(Integer, primary_key=True)
     tg_user_id = Column(BigInteger, index=True, nullable=False)
+    # lpu — склад-получатель (выбирается на этапе оформления заказа).
     lpu = Column(String, nullable=True)
+    # source_lpu — склад-источник: фиксируется при первом добавлении позиции
+    # в корзину (то, что было в filters.warehouse в момент выбора товара).
+    source_lpu = Column(String, nullable=True)
     status = Column(String, default="active")  # active / submitted
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     delivery_date = Column(String, nullable=True)
     delivery_time = Column(String, nullable=True)
     doctor = Column(String, nullable=True)
     instrument = Column(String, nullable=True)
+    comment = Column(Text, nullable=True)
 
 
 class CartItem(Base):

@@ -137,7 +137,7 @@ export default function CartPage() {
             {/* Заголовок корзины */}
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-gray-500">
-                Заказ #{cart.id} &nbsp;|&nbsp; ЛПУ: <b>{cart.lpu || 'не указано'}</b>
+                Заказ #{cart.id} &nbsp;|&nbsp; Склад отбора: <b>{cart.source_lpu || '—'}</b>
                 &nbsp;|&nbsp; Позиций: <b>{cart.items.length}</b>
               </p>
               <button
@@ -194,7 +194,7 @@ export default function CartPage() {
                 <OrderForm
                   onSubmit={handlePlaceOrder}
                   submitting={submitting}
-                  initialLpu={cart.lpu || ''}
+                  sourceLpu={cart.source_lpu || ''}
                   regionContext={sessionStorage.getItem('cart_region') || ''}
                 />
               </div>

@@ -39,10 +39,16 @@ function OrderCard({ order }) {
           </div>
           <div className="mt-1 text-sm text-gray-500 space-y-0.5">
             <p>📅 Создан: {createdAt}</p>
-            <p>🏥 ЛПУ: <span className="font-medium text-gray-700">{order.lpu || '—'}</span></p>
+            {order.source_lpu && (
+              <p>🏭 Склад отбора: <span className="font-medium text-gray-700">{order.source_lpu}</span></p>
+            )}
+            <p>🏥 ЛПУ-получатель: <span className="font-medium text-gray-700">{order.lpu || '—'}</span></p>
             {order.doctor && <p>👨‍⚕️ Врач: <span className="font-medium text-gray-700">{order.doctor}</span></p>}
             {order.delivery_date && (
               <p>🚚 Доставка: <span className="font-medium text-gray-700">{order.delivery_date} в {order.delivery_time}</span></p>
+            )}
+            {order.comment && (
+              <p>💬 Комментарий: <span className="font-medium text-gray-700">{order.comment}</span></p>
             )}
           </div>
         </div>

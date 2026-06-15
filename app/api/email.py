@@ -25,6 +25,8 @@ def _send_email_sync(
     delivery_time: str = "не указано",
     doctor: str = "не указано",
     instrument: str = "нет",
+    source_lpu: str = "не указано",
+    comment: str = "",
 ) -> None:
     """Синхронная отправка письма: HTML-таблица в теле + Excel во вложении."""
     import openpyxl
@@ -50,15 +52,22 @@ def _send_email_sync(
             f'</tr>'
         )
 
+    comment_html_row = (
+        f'<tr><td style="padding:4px 16px 4px 0;color:#666">Комментарий:</td>'
+        f'<td><b>{comment}</b></td></tr>'
+        if comment else ""
+    )
     html_body = f"""<html><body style="font-family:Arial,sans-serif;font-size:14px;color:#333">
 <h2 style="color:#2c5f8a">Заказ #{cart_id}</h2>
 <table style="border-collapse:collapse;margin-bottom:16px">
   <tr><td style="padding:4px 16px 4px 0;color:#666">Дата:</td><td><b>{now_str}</b></td></tr>
-  <tr><td style="padding:4px 16px 4px 0;color:#666">ЛПУ:</td><td><b>{lpu}</b></td></tr>
+  <tr><td style="padding:4px 16px 4px 0;color:#666">Склад отбора:</td><td><b>{source_lpu}</b></td></tr>
+  <tr><td style="padding:4px 16px 4px 0;color:#666">ЛПУ-получатель:</td><td><b>{lpu}</b></td></tr>
   <tr><td style="padding:4px 16px 4px 0;color:#666">Дата доставки:</td><td><b>{delivery_date}</b></td></tr>
   <tr><td style="padding:4px 16px 4px 0;color:#666">Время доставки:</td><td><b>{delivery_time}</b></td></tr>
   <tr><td style="padding:4px 16px 4px 0;color:#666">Врач:</td><td><b>{doctor}</b></td></tr>
   <tr><td style="padding:4px 16px 4px 0;color:#666">Инструмент:</td><td><b>{instrument}</b></td></tr>
+  {comment_html_row}
   <tr><td style="padding:4px 16px 4px 0;color:#666">Пользователь:</td>
       <td><b>{user_full_name}</b> (@{user_username}, ID: {user_tg_id})</td></tr>
 </table>
@@ -91,13 +100,16 @@ def _send_email_sync(
     meta = [
         ("Заказ №",        str(cart_id)),
         ("Дата",           now_str),
-        ("ЛПУ",            lpu),
+        ("Склад отбора",   source_lpu),
+        ("ЛПУ-получатель", lpu),
         ("Дата доставки",  delivery_date),
         ("Время доставки", delivery_time),
         ("Врач",           doctor),
         ("Инструмент",     instrument),
-        ("Пользователь",   f"{user_full_name} (@{user_username}, ID: {user_tg_id})"),
     ]
+    if comment:
+        meta.append(("Комментарий", comment))
+    meta.append(("Пользователь", f"{user_full_name} (@{user_username}, ID: {user_tg_id})"))
     for row_num, (label, value) in enumerate(meta, 1):
         ws.merge_cells(f"A{row_num}:E{row_num}")
         ws.cell(row=row_num, column=1, value=f"{label}:  {value}").font = label_font
@@ -133,10 +145,13 @@ def _send_email_sync(
     msg["To"]      = ", ".join(recipients)
 
     alt = MIMEMultipart("alternative")
+    plain_comment = f"Комментарий: {comment}\n" if comment else ""
     plain = (
-        f"Заказ #{cart_id}\nДата: {now_str}\nЛПУ: {lpu}\n"
+        f"Заказ #{cart_id}\nДата: {now_str}\n"
+        f"Склад отбора: {source_lpu}\nЛПУ-получатель: {lpu}\n"
         f"Дата доставки: {delivery_date}\nВремя доставки: {delivery_time}\n"
         f"Врач: {doctor}\nИнструмент: {instrument}\n"
+        f"{plain_comment}"
         f"Пользователь: {user_full_name} (@{user_username}, ID: {user_tg_id})\n\n"
         + "\n".join(
             f"{i}. [{art}] {nom} | {char} — {qty} шт."
@@ -177,10 +192,12 @@ async def send_order_notification(
     delivery_time: str = "не указано",
     doctor: str = "не указано",
     instrument: str = "нет",
+    source_lpu: str = "не указано",
+    comment: str = "",
 ) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None, _send_email_sync,
         subject, cart_id, lpu, user_full_name, user_username, user_tg_id, now_str, items_snapshot,
-        delivery_date, delivery_time, doctor, instrument,
+        delivery_date, delivery_time, doctor, instrument, source_lpu, comment,
     )
