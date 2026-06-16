@@ -218,6 +218,7 @@ def user_add():
     tg_id_raw = request.form.get("tg_id") or ""
     full_name = (request.form.get("full_name") or "").strip() or None
     title     = (request.form.get("title") or "").strip() or None
+    email     = (request.form.get("email") or "").strip() or None
     is_super  = 1 if request.form.get("is_superuser") else 0
     active    = 1 if request.form.get("active", "1") else 0
 
@@ -247,6 +248,7 @@ def user_add():
             return redirect(url_for("upload_file"))
 
     u = User(username=username, tg_id=tg_id, full_name=full_name, title=title,
+             email=email,
              modules=_parse_modules(request.form),
              is_superuser=is_super, active=active)
     if password:
@@ -491,6 +493,7 @@ def user_edit(user_id: int):
     username = (request.form.get("username") or "").strip() or None
     full_name = (request.form.get("full_name") or "").strip() or None
     title     = (request.form.get("title") or "").strip() or None
+    email     = (request.form.get("email") or "").strip() or None
     tg_id     = _normalize_tg_id(request.form.get("tg_id") or "")
     if tg_id == "INVALID":
         flash("tg_id должен быть числом.", "error")
@@ -516,6 +519,7 @@ def user_edit(user_id: int):
     u.username = username
     u.full_name = full_name
     u.title = title
+    u.email = email
     u.tg_id = tg_id
     db_session.commit()
     flash("✅ Данные обновлены.", "success")

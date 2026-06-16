@@ -106,6 +106,7 @@ class User(Base, UserMixin):
     tg_id = Column(BigInteger, unique=True, index=True, nullable=True)
     full_name = Column(String, nullable=True)
     title = Column(String, nullable=True)
+    email = Column(String, nullable=True)
     modules = Column(String, nullable=True)
     is_superuser = Column(Integer, nullable=False, default=0)
     active = Column(Integer, nullable=False, default=1)

@@ -343,6 +343,7 @@ async def place_order(
         source_lpu=source_lpu or "не указано",
         comment=comment_val or "",
         kind=kind,
+        user_email=current_user.email or "",
     ))
 
     asyncio.create_task(log_activity(

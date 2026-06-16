@@ -165,6 +165,11 @@
                     <input class="form-control form-control-sm" type="text" name="title"
                            value="{{ u.title or '' }}">
                 </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Email <span class="text-muted">(для копии письма о заказе)</span></label>
+                    <input class="form-control form-control-sm" type="email" name="email"
+                           value="{{ u.email or '' }}" placeholder="user@example.com">
+                </div>
                 <div class="col-md-2">
                     <button class="btn btn-primary btn-sm w-100">Сохранить</button>
                 </div>
@@ -202,8 +207,12 @@
                 <input class="form-control form-control-sm" type="text" name="username"
                        placeholder="Логин (a-z 0-9 _ -)" pattern="[a-zA-Z0-9_\-]+">
             </div>
-            <div>
+            <div class="mb-2">
                 <input class="form-control form-control-sm" type="password" name="password" placeholder="Пароль">
+            </div>
+            <div>
+                <input class="form-control form-control-sm" type="email" name="email"
+                       placeholder="Email (для копии письма о заказе)">
             </div>
         </div>
         <div class="col-md-6 p-3 rounded tg-section">

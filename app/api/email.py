@@ -28,6 +28,7 @@ def _send_email_sync(
     source_lpu: str = "не указано",
     comment: str = "",
     kind: str = "implants",
+    user_email: str = "",
 ) -> None:
     """Синхронная отправка письма: HTML-таблица в теле + Excel во вложении."""
     import openpyxl
@@ -39,6 +40,11 @@ def _send_email_sync(
         return
 
     recipients = [r.strip() for r in ORDER_EMAIL_TO.split(",") if r.strip()]
+
+    # Копия письма заказчику, если у него указан email и его ещё нет в списке.
+    ue = (user_email or "").strip()
+    if ue and "@" in ue and ue.lower() not in {r.lower() for r in recipients}:
+        recipients.append(ue)
 
     kind_label = "инструменты" if kind == "supplies" else "импланты"
 
@@ -198,10 +204,11 @@ async def send_order_notification(
     source_lpu: str = "не указано",
     comment: str = "",
     kind: str = "implants",
+    user_email: str = "",
 ) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None, _send_email_sync,
         subject, cart_id, lpu, user_full_name, user_username, user_tg_id, now_str, items_snapshot,
-        delivery_date, delivery_time, doctor, instrument, source_lpu, comment, kind,
+        delivery_date, delivery_time, doctor, instrument, source_lpu, comment, kind, user_email,
     )
