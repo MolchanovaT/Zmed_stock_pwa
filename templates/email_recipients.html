@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Рассылка заказов</title>
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+</head>
+<body class="p-4">
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">✉️ Рассылка уведомлений о заказах</h2>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('upload_file') }}" class="btn btn-outline-secondary btn-sm">← К пользователям</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Выйти</a>
+    </div>
+</div>
+
+{% with m = get_flashed_messages(with_categories=true) %}
+{% for cat, txt in m %}
+<div class="alert alert-{{ 'danger' if cat=='error' else cat }} alert-dismissible fade show">
+    {{ txt }}
+    <button class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endwith %}
+
+<p class="text-muted small">
+    Эти адреса получают копию письма при каждом оформлении заказа в PWA.<br>
+    Заказчик дополнительно получает копию на свой email (если он указан у него в профиле).
+</p>
+
+<table class="table table-sm table-bordered" style="max-width: 800px;">
+    <thead class="table-light">
+    <tr>
+        <th style="width: 45%">Email</th>
+        <th style="width: 35%">Назначение</th>
+        <th style="width: 20%"></th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for r in recipients %}
+    <tr>
+        <td>
+            <form action="{{ url_for('email_recipient_edit', rid=r.id) }}" method="post" class="d-flex gap-2 m-0">
+                <input class="form-control form-control-sm" type="email" name="email"
+                       value="{{ r.email }}" required>
+        </td>
+        <td>
+                <input class="form-control form-control-sm" type="text" name="label"
+                       value="{{ r.label or '' }}" placeholder="например, отдел продаж">
+        </td>
+        <td class="text-end">
+                <button class="btn btn-primary btn-sm">Сохранить</button>
+            </form>
+            <form action="{{ url_for('email_recipient_del', rid=r.id) }}" method="post"
+                  class="d-inline ms-1"
+                  onsubmit="return confirm('Удалить адрес «{{ r.email }}»?');">
+                <button class="btn btn-outline-danger btn-sm">🗑</button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr>
+        <td colspan="3" class="text-muted"><em>Список пуст — рассылка пойдёт только заказчику (если у него есть email).</em></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h5 class="mt-4">➕ Добавить адрес</h5>
+<form action="{{ url_for('email_recipient_add') }}" method="post" class="d-flex gap-2" style="max-width: 800px;">
+    <input class="form-control form-control-sm" type="email" name="email" placeholder="email@example.com" required>
+    <input class="form-control form-control-sm" type="text" name="label" placeholder="Назначение (необязательно)">
+    <button class="btn btn-success btn-sm">Добавить</button>
+</form>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

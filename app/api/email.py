@@ -33,18 +33,27 @@ def _send_email_sync(
     """Синхронная отправка письма: HTML-таблица в теле + Excel во вложении."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from app.config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, ORDER_EMAIL_TO
+    from sqlalchemy.orm import Session
+    from app.config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+    from app.db.session import sync_engine
+    from app.db.models import EmailRecipient
 
-    if not SMTP_HOST or not ORDER_EMAIL_TO:
+    if not SMTP_HOST:
         logger.info("SMTP не настроен, письмо не отправлено.")
         return
 
-    recipients = [r.strip() for r in ORDER_EMAIL_TO.split(",") if r.strip()]
+    # Список адресов рассылки берём из БД (редактируется в админке).
+    with Session(sync_engine) as s:
+        recipients = [r.email.strip() for r in s.query(EmailRecipient).all() if r.email and r.email.strip()]
 
     # Копия письма заказчику, если у него указан email и его ещё нет в списке.
     ue = (user_email or "").strip()
     if ue and "@" in ue and ue.lower() not in {r.lower() for r in recipients}:
         recipients.append(ue)
+
+    if not recipients:
+        logger.info("Нет адресатов рассылки, письмо не отправлено.")
+        return
 
     kind_label = "инструменты" if kind == "supplies" else "импланты"
 

@@ -164,6 +164,21 @@ class CartItem(Base):
     available_balance = Column(Numeric)
 
 
+class EmailRecipient(Base):
+    """Адресат рассылки уведомлений о заказах.
+
+    Раньше список лежал в ORDER_EMAIL_TO в .env, теперь редактируется
+    админом через Flask-админку на /email-recipients.
+    """
+    __tablename__ = "email_recipients"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String, nullable=False, unique=True)
+    label = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+
+
 class InnDiler(Base):
     """Дилеры для проверки отгрузки по ИНН."""
     __tablename__ = "inn_dilers"

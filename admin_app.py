@@ -17,7 +17,7 @@ from app.tools.zip_helper import extract_zip
 from functools import wraps
 from flask import abort
 
-from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending
+from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient
 from app.db.models_stats import TgUser, Interaction  # noqa: F401  -- регистрируем модели в Base.metadata
 from app.tools.import_supplies import load_supplies_file
 
@@ -564,6 +564,70 @@ def user_del(user_id: int):
     else:
         flash("Пользователь не найден.", "error")
     return redirect(url_for("upload_file"))
+
+
+# ─────────────────────────────
+# Рассылка заказов: адресаты
+
+@app.route("/email-recipients", methods=["GET"])
+@login_required
+def email_recipients():
+    items = db_session.query(EmailRecipient).order_by(EmailRecipient.email).all()
+    return render_template("email_recipients.html", recipients=items)
+
+
+@app.post("/email-recipients/add")
+@login_required
+def email_recipient_add():
+    email = (request.form.get("email") or "").strip().lower()
+    label = (request.form.get("label") or "").strip() or None
+    if not email or "@" not in email:
+        flash("Укажите корректный email.", "error")
+        return redirect(url_for("email_recipients"))
+    if db_session.query(EmailRecipient).filter_by(email=email).first():
+        flash(f"Адрес «{email}» уже в списке.", "warning")
+        return redirect(url_for("email_recipients"))
+    db_session.add(EmailRecipient(email=email, label=label))
+    db_session.commit()
+    flash(f"✅ Адрес «{email}» добавлен.", "success")
+    return redirect(url_for("email_recipients"))
+
+
+@app.post("/email-recipients/edit/<int:rid>")
+@login_required
+def email_recipient_edit(rid: int):
+    r = db_session.get(EmailRecipient, rid)
+    if not r:
+        flash("Адрес не найден.", "error")
+        return redirect(url_for("email_recipients"))
+    new_email = (request.form.get("email") or "").strip().lower()
+    new_label = (request.form.get("label") or "").strip() or None
+    if not new_email or "@" not in new_email:
+        flash("Укажите корректный email.", "error")
+        return redirect(url_for("email_recipients"))
+    if new_email != r.email:
+        if db_session.query(EmailRecipient).filter_by(email=new_email).first():
+            flash(f"Адрес «{new_email}» уже занят.", "warning")
+            return redirect(url_for("email_recipients"))
+    r.email = new_email
+    r.label = new_label
+    db_session.commit()
+    flash("✅ Сохранено.", "success")
+    return redirect(url_for("email_recipients"))
+
+
+@app.post("/email-recipients/del/<int:rid>")
+@login_required
+def email_recipient_del(rid: int):
+    r = db_session.get(EmailRecipient, rid)
+    if r:
+        email = r.email
+        db_session.delete(r)
+        db_session.commit()
+        flash(f"🗑 Адрес «{email}» удалён.", "success")
+    else:
+        flash("Адрес не найден.", "error")
+    return redirect(url_for("email_recipients"))
 
 
 ACTION_LABELS = {
