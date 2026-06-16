@@ -5,27 +5,46 @@ import CartItem from '../components/CartItem'
 import OrderForm from '../components/OrderForm'
 import { getCart, placeOrder, clearCart } from '../api/cart'
 
-export default function CartPage() {
+const KIND_CONFIG = {
+  implants: {
+    title: 'Корзина',
+    searchPath: '/',
+    ordersPath: '/orders',
+    headerClass: 'bg-brand-500',
+    regionKey: 'cart_region',
+  },
+  supplies: {
+    title: 'Корзина расходников',
+    searchPath: '/supplies',
+    ordersPath: '/supplies/orders',
+    headerClass: 'bg-teal-600',
+    regionKey: 'cart_region_supplies',
+  },
+}
+
+export default function CartPage({ kind = 'implants' }) {
   const { user, signout } = useAuth()
   const navigate = useNavigate()
+
+  const cfg = KIND_CONFIG[kind] ?? KIND_CONFIG.implants
 
   const [cart, setCart] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [orderDone, setOrderDone] = useState(null)  // { order_id, message }
+  const [orderDone, setOrderDone] = useState(null)
   const [error, setError] = useState('')
 
   const loadCart = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await getCart()
+      const data = await getCart(kind)
       setCart(data)
     } catch {
       setError('Ошибка загрузки корзины')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [kind])
 
   useEffect(() => { loadCart() }, [loadCart])
 
@@ -45,7 +64,7 @@ export default function CartPage() {
 
   const handleClearCart = async () => {
     if (!window.confirm('Очистить корзину? Все позиции будут удалены.')) return
-    await clearCart()
+    await clearCart(kind)
     setCart(null)
   }
 
@@ -53,10 +72,10 @@ export default function CartPage() {
     setSubmitting(true)
     setError('')
     try {
-      const result = await placeOrder(formData)
+      const result = await placeOrder(formData, kind)
       setOrderDone(result)
       setCart(null)
-      sessionStorage.removeItem('cart_region')
+      sessionStorage.removeItem(cfg.regionKey)
     } catch (err) {
       setError(err.response?.data?.detail || 'Ошибка оформления заказа')
     } finally {
@@ -67,24 +86,24 @@ export default function CartPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Шапка */}
-      <header className="bg-brand-500 text-white shadow-md">
+      <header className={`${cfg.headerClass} text-white shadow-md`}>
         {/* Ряд 1: навигация */}
         <div className="px-4 pt-3 pb-1.5 flex items-center justify-between">
           <button onClick={() => navigate('/home')} className="text-white/80 hover:text-white transition-colors text-sm">
             ← Главная
           </button>
-          <h1 className="font-bold text-lg">Корзина</h1>
+          <h1 className="font-bold text-lg">{cfg.title}</h1>
           <button onClick={signout} className="text-white/70 hover:text-white transition-colors text-sm">
             Выйти
           </button>
         </div>
         {/* Ряд 2: действия */}
         <div className="px-4 pb-2.5 flex items-center justify-between text-sm">
-          <button onClick={() => navigate('/')} className="text-white/80 hover:text-white transition-colors">
+          <button onClick={() => navigate(cfg.searchPath)} className="text-white/80 hover:text-white transition-colors">
             ← Поиск
           </button>
           <button
-            onClick={() => navigate('/orders')}
+            onClick={() => navigate(cfg.ordersPath)}
             className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors"
           >
             📋 Заказы
@@ -102,7 +121,7 @@ export default function CartPage() {
             </h2>
             <p className="text-sm text-green-600 mb-4">{orderDone.message}</p>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate(cfg.searchPath)}
               className="bg-brand-500 hover:bg-brand-600 text-white px-6 py-2.5
                          rounded-lg font-semibold transition-colors"
             >
@@ -122,7 +141,7 @@ export default function CartPage() {
             <div className="text-5xl mb-4">🛒</div>
             <p className="text-gray-500 mb-6">Корзина пуста</p>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate(cfg.searchPath)}
               className="bg-brand-500 hover:bg-brand-600 text-white px-6 py-2.5
                          rounded-lg font-semibold transition-colors"
             >
@@ -195,7 +214,8 @@ export default function CartPage() {
                   onSubmit={handlePlaceOrder}
                   submitting={submitting}
                   sourceLpu={cart.source_lpu || ''}
-                  regionContext={sessionStorage.getItem('cart_region') || ''}
+                  regionContext={sessionStorage.getItem(cfg.regionKey) || ''}
+                  kind={kind}
                 />
               </div>
             )}

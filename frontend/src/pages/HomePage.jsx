@@ -137,14 +137,16 @@ export default function HomePage() {
   )
 
   const hasImplants = user?.modules?.includes('implants')
+  const hasSupplies = user?.modules?.includes('supplies')
+  const canSeeOrders = hasImplants || hasSupplies
 
   const [orders, setOrders] = useState([])
   useEffect(() => {
-    if (!hasImplants) return
+    if (!canSeeOrders) return
     getOrders()
       .then((data) => setOrders(Array.isArray(data) ? data : []))
       .catch(() => {})
-  }, [hasImplants])
+  }, [canSeeOrders])
 
   const recentOrders = orders.slice(0, 5)
 
@@ -212,16 +214,28 @@ export default function HomePage() {
           </div>
         )}
 
-        {hasImplants && recentOrders.length > 0 && (
+        {canSeeOrders && recentOrders.length > 0 && (
           <section className="mt-10">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
               <h2 className="text-lg font-bold text-gray-800">Последние заказы</h2>
-              <button
-                onClick={() => navigate('/orders')}
-                className="text-sm font-medium text-brand-600 hover:text-brand-700"
-              >
-                Все заказы →
-              </button>
+              <div className="flex items-center gap-3 text-sm font-medium">
+                {hasImplants && (
+                  <button
+                    onClick={() => navigate('/orders')}
+                    className="text-brand-600 hover:text-brand-700"
+                  >
+                    Импланты →
+                  </button>
+                )}
+                {hasSupplies && (
+                  <button
+                    onClick={() => navigate('/supplies/orders')}
+                    className="text-teal-600 hover:text-teal-700"
+                  >
+                    Расходники →
+                  </button>
+                )}
+              </div>
             </div>
             <div className="space-y-3">
               {recentOrders.map((order) => (

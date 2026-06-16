@@ -31,6 +31,16 @@ export default function OrderCard({ order }) {
             <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
               Оформлен
             </span>
+            {order.kind === 'supplies' && (
+              <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
+                Расходники
+              </span>
+            )}
+            {order.kind === 'implants' && (
+              <span className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">
+                Импланты
+              </span>
+            )}
           </div>
           <div className="mt-1 text-sm text-gray-500 space-y-0.5">
             <p>📅 Создан: {createdAt}</p>

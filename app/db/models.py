@@ -134,6 +134,9 @@ class Cart(Base):
 
     id = Column(Integer, primary_key=True)
     tg_user_id = Column(BigInteger, index=True, nullable=False)
+    # kind — раздел: 'implants' или 'supplies'. У одного юзера может быть
+    # одновременно по одной активной корзине каждого типа.
+    kind = Column(String, nullable=False, default="implants")
     # lpu — склад-получатель (выбирается на этапе оформления заказа).
     lpu = Column(String, nullable=True)
     # source_lpu — склад-источник: фиксируется при первом добавлении позиции

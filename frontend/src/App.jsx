@@ -40,7 +40,7 @@ export default function App() {
             path="/cart"
             element={
               <ProtectedRoute requiredModule="implants">
-                <CartPage />
+                <CartPage kind="implants" />
               </ProtectedRoute>
             }
           />
@@ -48,7 +48,7 @@ export default function App() {
             path="/orders"
             element={
               <ProtectedRoute requiredModule="implants">
-                <OrdersPage />
+                <OrdersPage kind="implants" />
               </ProtectedRoute>
             }
           />
@@ -63,12 +63,28 @@ export default function App() {
             }
           />
 
-          {/* Модуль: Расходники и инструменты */}
+          {/* Модуль: Расходники и инструменты (с корзиной и заказами) */}
           <Route
             path="/supplies"
             element={
               <ProtectedRoute requiredModule="supplies">
                 <SuppliesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/supplies/cart"
+            element={
+              <ProtectedRoute requiredModule="supplies">
+                <CartPage kind="supplies" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/supplies/orders"
+            element={
+              <ProtectedRoute requiredModule="supplies">
+                <OrdersPage kind="supplies" />
               </ProtectedRoute>
             }
           />

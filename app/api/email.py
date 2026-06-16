@@ -27,6 +27,7 @@ def _send_email_sync(
     instrument: str = "нет",
     source_lpu: str = "не указано",
     comment: str = "",
+    kind: str = "implants",
 ) -> None:
     """Синхронная отправка письма: HTML-таблица в теле + Excel во вложении."""
     import openpyxl
@@ -38,6 +39,8 @@ def _send_email_sync(
         return
 
     recipients = [r.strip() for r in ORDER_EMAIL_TO.split(",") if r.strip()]
+
+    kind_label = "расходники" if kind == "supplies" else "импланты"
 
     rows_html = ""
     for i, (art, nom, char, qty, _avail) in enumerate(items_snapshot, 1):
@@ -58,7 +61,7 @@ def _send_email_sync(
         if comment else ""
     )
     html_body = f"""<html><body style="font-family:Arial,sans-serif;font-size:14px;color:#333">
-<h2 style="color:#2c5f8a">Заказ #{cart_id}</h2>
+<h2 style="color:#2c5f8a">Заказ #{cart_id} ({kind_label})</h2>
 <table style="border-collapse:collapse;margin-bottom:16px">
   <tr><td style="padding:4px 16px 4px 0;color:#666">Дата:</td><td><b>{now_str}</b></td></tr>
   <tr><td style="padding:4px 16px 4px 0;color:#666">Склад отбора:</td><td><b>{source_lpu}</b></td></tr>
@@ -98,7 +101,7 @@ def _send_email_sync(
 
     label_font = Font(bold=True)
     meta = [
-        ("Заказ №",        str(cart_id)),
+        ("Заказ №",        f"{cart_id} ({kind_label})"),
         ("Дата",           now_str),
         ("Склад отбора",   source_lpu),
         ("ЛПУ-получатель", lpu),
@@ -147,7 +150,7 @@ def _send_email_sync(
     alt = MIMEMultipart("alternative")
     plain_comment = f"Комментарий: {comment}\n" if comment else ""
     plain = (
-        f"Заказ #{cart_id}\nДата: {now_str}\n"
+        f"Заказ #{cart_id} ({kind_label})\nДата: {now_str}\n"
         f"Склад отбора: {source_lpu}\nЛПУ-получатель: {lpu}\n"
         f"Дата доставки: {delivery_date}\nВремя доставки: {delivery_time}\n"
         f"Врач: {doctor}\nИнструмент: {instrument}\n"
@@ -194,10 +197,11 @@ async def send_order_notification(
     instrument: str = "нет",
     source_lpu: str = "не указано",
     comment: str = "",
+    kind: str = "implants",
 ) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None, _send_email_sync,
         subject, cart_id, lpu, user_full_name, user_username, user_tg_id, now_str, items_snapshot,
-        delivery_date, delivery_time, doctor, instrument, source_lpu, comment,
+        delivery_date, delivery_time, doctor, instrument, source_lpu, comment, kind,
     )

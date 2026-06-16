@@ -16,7 +16,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, delete
 
@@ -27,6 +27,14 @@ from app.db.models import User, Cart, CartItem
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/cart", tags=["cart"])
+
+ALLOWED_KINDS = {"implants", "supplies"}
+
+
+def _validate_kind(kind: str) -> str:
+    if kind not in ALLOWED_KINDS:
+        raise HTTPException(status_code=400, detail=f"Неизвестный kind: {kind}")
+    return kind
 
 
 # ── Pydantic-схемы ─────────────────────────────────────────────────────────────
@@ -58,6 +66,7 @@ class OrderIn(BaseModel):
 def _serialize_cart(cart: Cart, items: list[CartItem]) -> dict:
     return {
         "id": cart.id,
+        "kind": cart.kind,
         "lpu": cart.lpu,
         "source_lpu": cart.source_lpu,
         "status": cart.status,
@@ -81,10 +90,14 @@ def _serialize_cart(cart: Cart, items: list[CartItem]) -> dict:
     }
 
 
-async def _get_active_cart(user_id: int, session) -> Optional[Cart]:
+async def _get_active_cart(user_id: int, session, kind: str = "implants") -> Optional[Cart]:
     result = await session.execute(
         select(Cart)
-        .where(Cart.tg_user_id == user_id, Cart.status == "active")
+        .where(
+            Cart.tg_user_id == user_id,
+            Cart.status == "active",
+            Cart.kind == kind,
+        )
         .order_by(Cart.created_at.desc())
     )
     return result.scalars().first()
@@ -93,10 +106,14 @@ async def _get_active_cart(user_id: int, session) -> Optional[Cart]:
 # ── Эндпоинты ─────────────────────────────────────────────────────────────────
 
 @router.get("")
-async def get_cart(current_user: User = Depends(get_current_user)):
+async def get_cart(
+    kind: str = Query("implants"),
+    current_user: User = Depends(get_current_user),
+):
     """Возвращает активную корзину пользователя вместе со всеми позициями."""
+    kind = _validate_kind(kind)
     async with AsyncSessionLocal() as s:
-        cart = await _get_active_cart(current_user.id, s)
+        cart = await _get_active_cart(current_user.id, s, kind)
         if not cart:
             return {"cart": None}
         items_res = await s.execute(
@@ -109,18 +126,21 @@ async def get_cart(current_user: User = Depends(get_current_user)):
 @router.post("/items", status_code=status.HTTP_201_CREATED)
 async def add_cart_item(
     body: CartItemIn,
+    kind: str = Query("implants"),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Добавляет позицию в активную корзину.
+    Добавляет позицию в активную корзину заданного типа (implants|supplies).
     Если активной корзины нет — создаёт новую с переданным lpu.
     """
+    kind = _validate_kind(kind)
     async with AsyncSessionLocal() as s:
-        cart = await _get_active_cart(current_user.id, s)
+        cart = await _get_active_cart(current_user.id, s, kind)
 
         if cart is None:
             cart = Cart(
                 tg_user_id=current_user.id,
+                kind=kind,
                 # lpu (получатель) выберется на этапе оформления заказа.
                 # source_lpu (источник) фиксируем здесь — потом не меняем.
                 source_lpu=(body.lpu or "").strip() or None,
@@ -200,10 +220,14 @@ async def delete_cart_item(
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-async def clear_cart(current_user: User = Depends(get_current_user)):
+async def clear_cart(
+    kind: str = Query("implants"),
+    current_user: User = Depends(get_current_user),
+):
     """Удаляет все позиции из активной корзины и саму корзину."""
+    kind = _validate_kind(kind)
     async with AsyncSessionLocal() as s:
-        cart = await _get_active_cart(current_user.id, s)
+        cart = await _get_active_cart(current_user.id, s, kind)
         if not cart:
             return
         await s.execute(
@@ -214,14 +238,24 @@ async def clear_cart(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/orders")
-async def get_orders(current_user: User = Depends(get_current_user)):
-    """Возвращает все оформленные заказы текущего пользователя (status=submitted)."""
+async def get_orders(
+    kind: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Возвращает оформленные заказы текущего пользователя (status=submitted).
+
+    Если передан kind — фильтрует по нему; иначе отдаёт все.
+    """
+    if kind is not None:
+        kind = _validate_kind(kind)
     async with AsyncSessionLocal() as s:
-        carts_res = await s.execute(
-            select(Cart)
-            .where(Cart.tg_user_id == current_user.id, Cart.status == "submitted")
-            .order_by(Cart.created_at.desc())
+        stmt = select(Cart).where(
+            Cart.tg_user_id == current_user.id,
+            Cart.status == "submitted",
         )
+        if kind is not None:
+            stmt = stmt.where(Cart.kind == kind)
+        carts_res = await s.execute(stmt.order_by(Cart.created_at.desc()))
         carts = list(carts_res.scalars().all())
 
         orders = []
@@ -238,6 +272,7 @@ async def get_orders(current_user: User = Depends(get_current_user)):
 @router.post("/order")
 async def place_order(
     body: OrderIn,
+    kind: str = Query("implants"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -246,8 +281,9 @@ async def place_order(
     - меняет статус корзины на "submitted"
     - отправляет email-уведомление (логика из handlers.send_order_notification)
     """
+    kind = _validate_kind(kind)
     async with AsyncSessionLocal() as s:
-        cart = await _get_active_cart(current_user.id, s)
+        cart = await _get_active_cart(current_user.id, s, kind)
         if not cart:
             raise HTTPException(status_code=404, detail="Активная корзина не найдена")
 
@@ -287,7 +323,8 @@ async def place_order(
         await s.commit()
 
     now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    subject = f"Заказ #{cart_id_val} | ЛПУ: {cart_lpu} | {now_str}"
+    kind_label = "расходники" if kind == "supplies" else "импланты"
+    subject = f"Заказ #{cart_id_val} ({kind_label}) | ЛПУ: {cart_lpu} | {now_str}"
 
     # Переиспользуем готовую логику отправки email из бота
     asyncio.create_task(send_order_notification(
@@ -305,6 +342,7 @@ async def place_order(
         instrument=body.instrument,
         source_lpu=source_lpu or "не указано",
         comment=comment_val or "",
+        kind=kind,
     ))
 
     asyncio.create_task(log_activity(

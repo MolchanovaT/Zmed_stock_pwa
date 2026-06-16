@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getLpuList } from '../api/stock'
+import { getSuppliesLpuList } from '../api/supplies'
 import SearchableSelect from './SearchableSelect'
 
 const MANUAL_LABEL = '✏️ Ввести вручную'
@@ -26,8 +27,9 @@ function toRuDate(isoDate) {
  *   submitting — boolean
  *   sourceLpu  — склад-источник (исключается из списка получателей)
  *   regionContext — регион поиска (фильтрует список складов)
+ *   kind — 'implants' | 'supplies'; определяет источник списка ЛПУ
  */
-export default function OrderForm({ onSubmit, submitting, sourceLpu = '', regionContext = '' }) {
+export default function OrderForm({ onSubmit, submitting, sourceLpu = '', regionContext = '', kind = 'implants' }) {
   const [form, setForm] = useState({
     lpu: '',
     lpu_manual: '',
@@ -44,10 +46,12 @@ export default function OrderForm({ onSubmit, submitting, sourceLpu = '', region
   const [lpuLoading, setLpuLoading] = useState(true)
 
   useEffect(() => {
-    getLpuList(regionContext)
+    setLpuLoading(true)
+    const fetcher = kind === 'supplies' ? getSuppliesLpuList : getLpuList
+    fetcher(regionContext)
       .then(setLpuList)
       .finally(() => setLpuLoading(false))
-  }, [regionContext])
+  }, [regionContext, kind])
 
   // Список получателей = все склады минус источник (case-insensitive)
   const recipientOptions = useMemo(() => {

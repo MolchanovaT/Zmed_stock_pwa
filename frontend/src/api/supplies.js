@@ -24,6 +24,12 @@ export const getSuppliesBrands = (group, region, warehouse, category, manufactur
     .get('/supplies/brands', { params: { group, region, warehouse, category, manufacturer } })
     .then((r) => r.data.items)
 
+/** Список складов расходников для выбора ЛПУ при оформлении заказа. */
+export const getSuppliesLpuList = (region = '') =>
+  client
+    .get('/supplies/warehouses', { params: region ? { region } : {} })
+    .then((r) => r.data.items)
+
 // ── Поиск ─────────────────────────────────────────────────────────────────────
 
 export const searchSupplies = (filters) =>

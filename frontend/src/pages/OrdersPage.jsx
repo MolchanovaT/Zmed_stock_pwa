@@ -4,33 +4,53 @@ import { useAuth } from '../store/auth'
 import { getOrders } from '../api/cart'
 import OrderCard from '../components/OrderCard'
 
-export default function OrdersPage() {
+const KIND_CONFIG = {
+  implants: {
+    title: 'Мои заказы',
+    searchPath: '/',
+    cartPath: '/cart',
+    headerClass: 'bg-brand-500',
+    primaryBtnClass: 'bg-brand-500 hover:bg-brand-600',
+  },
+  supplies: {
+    title: 'Заказы расходников',
+    searchPath: '/supplies',
+    cartPath: '/supplies/cart',
+    headerClass: 'bg-teal-600',
+    primaryBtnClass: 'bg-teal-600 hover:bg-teal-700',
+  },
+}
+
+export default function OrdersPage({ kind = 'implants' }) {
   const { user, signout } = useAuth()
   const navigate = useNavigate()
+
+  const cfg = KIND_CONFIG[kind] ?? KIND_CONFIG.implants
 
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    getOrders()
+    setLoading(true)
+    getOrders(kind)
       .then(setOrders)
       .catch(() => setError('Ошибка загрузки заказов'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [kind])
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-brand-500 text-white px-4 py-3 flex items-center justify-between shadow-md">
+      <header className={`${cfg.headerClass} text-white px-4 py-3 flex items-center justify-between shadow-md`}>
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/')} className="text-white/80 hover:text-white">
+          <button onClick={() => navigate(cfg.searchPath)} className="text-white/80 hover:text-white">
             ← Поиск
           </button>
-          <h1 className="font-bold text-lg">Мои заказы</h1>
+          <h1 className="font-bold text-lg">{cfg.title}</h1>
         </div>
         <div className="flex items-center gap-3 text-sm">
           <button
-            onClick={() => navigate('/cart')}
+            onClick={() => navigate(cfg.cartPath)}
             className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
           >
             🛒 Корзина
@@ -56,9 +76,9 @@ export default function OrdersPage() {
             <div className="text-5xl mb-4">📋</div>
             <p className="text-gray-500 mb-6">Заказов пока нет</p>
             <button
-              onClick={() => navigate('/')}
-              className="bg-brand-500 hover:bg-brand-600 text-white px-6 py-2.5
-                         rounded-lg font-semibold transition-colors"
+              onClick={() => navigate(cfg.searchPath)}
+              className={`${cfg.primaryBtnClass} text-white px-6 py-2.5
+                         rounded-lg font-semibold transition-colors`}
             >
               Начать поиск
             </button>
