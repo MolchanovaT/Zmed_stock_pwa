@@ -76,8 +76,8 @@ SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER: str = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM: str = os.getenv("SMTP_FROM", "")
-# Получатели заказов (через запятую)
-ORDER_EMAIL_TO: str = os.getenv("ORDER_EMAIL_TO", "")
+# Адресаты рассылки заказов теперь редактируются в админке :5102 → «Рассылка заказов»
+# (таблица email_recipients).
 
 # ────────────────────────────────────────────────────────────────
 # Разное (можно добавить позже: LOG_LEVEL, SENTRY_DSN и т. д.)
