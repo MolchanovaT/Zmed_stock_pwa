@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
+import { getOrders } from '../api/cart'
+import OrderCard from '../components/OrderCard'
 
 /* ── SVG-иконки модулей ─────────────────────────────────────────────────── */
 
@@ -133,6 +136,18 @@ export default function HomePage() {
     (m) => user?.modules?.includes(m.id)
   )
 
+  const hasImplants = user?.modules?.includes('implants')
+
+  const [orders, setOrders] = useState([])
+  useEffect(() => {
+    if (!hasImplants) return
+    getOrders()
+      .then((data) => setOrders(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [hasImplants])
+
+  const recentOrders = orders.slice(0, 5)
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Шапка */}
@@ -195,6 +210,25 @@ export default function HomePage() {
               </button>
             ))}
           </div>
+        )}
+
+        {hasImplants && recentOrders.length > 0 && (
+          <section className="mt-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-800">Последние заказы</h2>
+              <button
+                onClick={() => navigate('/orders')}
+                className="text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                Все заказы →
+              </button>
+            </div>
+            <div className="space-y-3">
+              {recentOrders.map((order) => (
+                <OrderCard key={order.id} order={order} />
+              ))}
+            </div>
+          </section>
         )}
       </main>
     </div>
