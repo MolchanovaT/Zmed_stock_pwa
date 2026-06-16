@@ -33,7 +33,7 @@ export default function OrderCard({ order }) {
             </span>
             {order.kind === 'supplies' && (
               <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
-                Расходники
+                Инструменты
               </span>
             )}
             {order.kind === 'implants' && (

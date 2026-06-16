@@ -323,7 +323,7 @@ async def place_order(
         await s.commit()
 
     now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    kind_label = "расходники" if kind == "supplies" else "импланты"
+    kind_label = "инструменты" if kind == "supplies" else "импланты"
     subject = f"Заказ #{cart_id_val} ({kind_label}) | ЛПУ: {cart_lpu} | {now_str}"
 
     # Переиспользуем готовую логику отправки email из бота

@@ -14,7 +14,7 @@ const KIND_CONFIG = {
     regionKey: 'cart_region',
   },
   supplies: {
-    title: 'Корзина расходников',
+    title: 'Корзина инструментов',
     searchPath: '/supplies',
     ordersPath: '/supplies/orders',
     headerClass: 'bg-teal-600',

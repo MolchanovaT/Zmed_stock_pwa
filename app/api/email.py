@@ -40,7 +40,7 @@ def _send_email_sync(
 
     recipients = [r.strip() for r in ORDER_EMAIL_TO.split(",") if r.strip()]
 
-    kind_label = "расходники" if kind == "supplies" else "импланты"
+    kind_label = "инструменты" if kind == "supplies" else "импланты"
 
     rows_html = ""
     for i, (art, nom, char, qty, _avail) in enumerate(items_snapshot, 1):

@@ -13,7 +13,7 @@ const KIND_CONFIG = {
     primaryBtnClass: 'bg-brand-500 hover:bg-brand-600',
   },
   supplies: {
-    title: 'Заказы расходников',
+    title: 'Заказы инструментов',
     searchPath: '/supplies',
     cartPath: '/supplies/cart',
     headerClass: 'bg-teal-600',

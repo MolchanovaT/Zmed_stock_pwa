@@ -232,7 +232,7 @@ export default function HomePage() {
                     onClick={() => navigate('/supplies/orders')}
                     className="text-teal-600 hover:text-teal-700"
                   >
-                    Расходники →
+                    Инструменты →
                   </button>
                 )}
               </div>
