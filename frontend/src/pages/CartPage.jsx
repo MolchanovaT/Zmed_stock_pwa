@@ -11,14 +11,12 @@ const KIND_CONFIG = {
     searchPath: '/',
     ordersPath: '/orders',
     headerClass: 'bg-brand-500',
-    regionKey: 'cart_region',
   },
   supplies: {
     title: 'Корзина инструментов',
     searchPath: '/supplies',
     ordersPath: '/supplies/orders',
     headerClass: 'bg-teal-600',
-    regionKey: 'cart_region_supplies',
   },
 }
 
@@ -75,7 +73,6 @@ export default function CartPage({ kind = 'implants' }) {
       const result = await placeOrder(formData, kind)
       setOrderDone(result)
       setCart(null)
-      sessionStorage.removeItem(cfg.regionKey)
     } catch (err) {
       setError(err.response?.data?.detail || 'Ошибка оформления заказа')
     } finally {
@@ -214,7 +211,6 @@ export default function CartPage({ kind = 'implants' }) {
                   onSubmit={handlePlaceOrder}
                   submitting={submitting}
                   sourceLpu={cart.source_lpu || ''}
-                  regionContext={sessionStorage.getItem(cfg.regionKey) || ''}
                   kind={kind}
                 />
               </div>

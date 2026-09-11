@@ -7,7 +7,7 @@ const MANUAL_LABEL = '✏️ Ввести вручную'
 const CUSTOM_SLOT = '__custom__'
 
 const TIME_SLOT_GROUPS = [
-  { label: 'Утро',  slots: ['07:00-08:30', '08:30-10:00', '10:00-11:00'] },
+  { label: 'Утро',  slots: ['07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00'] },
   { label: 'День',  slots: ['11:00-12:00', '12:00-13:00', '13:00-14:00'] },
   { label: 'Вечер', slots: ['14:00-15:00', '15:00-16:00', '16:00-17:00'] },
 ]
@@ -26,10 +26,9 @@ function toRuDate(isoDate) {
  *   onSubmit({ lpu, delivery_date, delivery_time, doctor, instrument, comment }) — callback
  *   submitting — boolean
  *   sourceLpu  — склад-источник (исключается из списка получателей)
- *   regionContext — регион поиска (фильтрует список складов)
  *   kind — 'implants' | 'supplies'; определяет источник списка ЛПУ
  */
-export default function OrderForm({ onSubmit, submitting, sourceLpu = '', regionContext = '', kind = 'implants' }) {
+export default function OrderForm({ onSubmit, submitting, sourceLpu = '', kind = 'implants' }) {
   const [form, setForm] = useState({
     lpu: '',
     lpu_manual: '',
@@ -48,10 +47,10 @@ export default function OrderForm({ onSubmit, submitting, sourceLpu = '', region
   useEffect(() => {
     setLpuLoading(true)
     const fetcher = kind === 'supplies' ? getSuppliesLpuList : getLpuList
-    fetcher(regionContext)
+    fetcher()
       .then(setLpuList)
       .finally(() => setLpuLoading(false))
-  }, [regionContext, kind])
+  }, [kind])
 
   // Список получателей = все склады минус источник (case-insensitive)
   const recipientOptions = useMemo(() => {
@@ -145,12 +144,6 @@ export default function OrderForm({ onSubmit, submitting, sourceLpu = '', region
           </span>
         </div>
       )}
-      {regionContext && !sourceLpu && (
-        <div className="bg-blue-50 border border-blue-100 rounded-md px-3 py-2 text-xs text-blue-700">
-          Регион поиска: <span className="font-semibold">{regionContext}</span> — уточните ЛПУ ниже
-        </div>
-      )}
-
       {/* ЛПУ-получатель */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">

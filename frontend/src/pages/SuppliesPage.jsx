@@ -87,11 +87,6 @@ export default function SuppliesPage() {
   const handleAddToCart = async (item) => {
     try {
       const warehouse = filters.warehouse && filters.warehouse !== 'все' ? filters.warehouse : ''
-      if (filters.region && filters.region !== 'все') {
-        sessionStorage.setItem('cart_region_supplies', filters.region)
-      } else {
-        sessionStorage.removeItem('cart_region_supplies')
-      }
       await addItem({
         article: '',
         nomenclature: item.nomenclature,

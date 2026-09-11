@@ -83,12 +83,6 @@ export default function SearchPage() {
   const handleAddToCart = async (item) => {
     try {
       const warehouse = filters.warehouse && filters.warehouse !== 'все' ? filters.warehouse : ''
-      // Сохраняем регион как контекст для формы заказа
-      if (filters.region && filters.region !== 'все') {
-        sessionStorage.setItem('cart_region', filters.region)
-      } else {
-        sessionStorage.removeItem('cart_region')
-      }
       await addItem({
         article: item.article,
         nomenclature: item.nomenclature,
