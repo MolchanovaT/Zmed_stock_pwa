@@ -344,6 +344,7 @@ async def place_order(
         comment=comment_val or "",
         kind=kind,
         user_email=current_user.email or "",
+        is_superuser=bool(current_user.is_superuser),
     ))
 
     asyncio.create_task(log_activity(

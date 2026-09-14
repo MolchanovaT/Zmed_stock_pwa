@@ -29,6 +29,7 @@ def _send_email_sync(
     comment: str = "",
     kind: str = "implants",
     user_email: str = "",
+    is_superuser: bool = False,
 ) -> None:
     """Синхронная отправка письма: HTML-таблица в теле + Excel во вложении."""
     import openpyxl
@@ -42,18 +43,30 @@ def _send_email_sync(
         logger.info("SMTP не настроен, письмо не отправлено.")
         return
 
-    # Список адресов рассылки берём из БД (редактируется в админке).
-    with Session(sync_engine) as s:
-        recipients = [r.email.strip() for r in s.query(EmailRecipient).all() if r.email and r.email.strip()]
-
-    # Копия письма заказчику, если у него указан email и его ещё нет в списке.
     ue = (user_email or "").strip()
-    if ue and "@" in ue and ue.lower() not in {r.lower() for r in recipients}:
-        recipients.append(ue)
 
-    if not recipients:
-        logger.info("Нет адресатов рассылки, письмо не отправлено.")
-        return
+    if is_superuser:
+        # Заказ от суперюзера: общий список получателей игнорируем,
+        # шлём только на email из его профиля.
+        if ue and "@" in ue:
+            recipients = [ue]
+        else:
+            logger.info(
+                "Заказ #%s от суперюзера без email в профиле — письмо не отправлено.",
+                cart_id,
+            )
+            return
+    else:
+        # Обычный пользователь: адресаты из БД (редактируются в админке) + копия заказчику.
+        with Session(sync_engine) as s:
+            recipients = [r.email.strip() for r in s.query(EmailRecipient).all() if r.email and r.email.strip()]
+
+        if ue and "@" in ue and ue.lower() not in {r.lower() for r in recipients}:
+            recipients.append(ue)
+
+        if not recipients:
+            logger.info("Нет адресатов рассылки, письмо не отправлено.")
+            return
 
     kind_label = "инструменты" if kind == "supplies" else "импланты"
 
@@ -214,10 +227,12 @@ async def send_order_notification(
     comment: str = "",
     kind: str = "implants",
     user_email: str = "",
+    is_superuser: bool = False,
 ) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None, _send_email_sync,
         subject, cart_id, lpu, user_full_name, user_username, user_tg_id, now_str, items_snapshot,
         delivery_date, delivery_time, doctor, instrument, source_lpu, comment, kind, user_email,
+        is_superuser,
     )
