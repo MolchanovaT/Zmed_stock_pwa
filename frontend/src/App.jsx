@@ -13,6 +13,7 @@ import ClinicReportsPage from './pages/ClinicReportsPage'
 import ClinicReportFormPage from './pages/ClinicReportFormPage'
 import ClinicStockPage from './pages/ClinicStockPage'
 import ClinicStockScanPage from './pages/ClinicStockScanPage'
+import ClinicLossesPage from './pages/ClinicLossesPage'
 
 export default function App() {
   return (
@@ -143,6 +144,14 @@ export default function App() {
             element={
               <ProtectedRoute requiredModule="clinic_stock">
                 <ClinicStockScanPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/clinic-stock/losses"
+            element={
+              <ProtectedRoute requiredModule="clinic_stock">
+                <ClinicLossesPage />
               </ProtectedRoute>
             }
           />

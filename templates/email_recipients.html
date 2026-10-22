@@ -26,52 +26,67 @@
 {% endwith %}
 
 <p class="text-muted small">
-    Эти адреса получают копию письма при каждом оформлении заказа в PWA.<br>
-    Заказчик дополнительно получает копию на свой email (если он указан у него в профиле).
+    Адресаты для <b>двух</b> типов уведомлений:<br>
+    &nbsp;• <b>Заказы</b> — копия письма при оформлении заказа в PWA (заказчик дополнительно получает копию на свой email из профиля).<br>
+    &nbsp;• <b>Отчёты</b> — уведомление, когда клиника отправит отчёт об операции (status: submitted).<br>
+    Тип «Всё» получает оба.
 </p>
 
-<table class="table table-sm table-bordered" style="max-width: 800px;">
+<table class="table table-sm table-bordered" style="max-width: 1050px;">
     <thead class="table-light">
     <tr>
-        <th style="width: 45%">Email</th>
-        <th style="width: 35%">Назначение</th>
-        <th style="width: 20%"></th>
+        <th style="width: 36%">Email</th>
+        <th style="width: 28%">Назначение</th>
+        <th style="width: 20%">Рассылка</th>
+        <th style="width: 16%"></th>
     </tr>
     </thead>
     <tbody>
     {% for r in recipients %}
     <tr>
-        <td>
-            <form action="{{ url_for('email_recipient_edit', rid=r.id) }}" method="post" class="d-flex gap-2 m-0">
+        <form action="{{ url_for('email_recipient_edit', rid=r.id) }}" method="post" class="m-0">
+            <td>
                 <input class="form-control form-control-sm" type="email" name="email"
                        value="{{ r.email }}" required>
-        </td>
-        <td>
+            </td>
+            <td>
                 <input class="form-control form-control-sm" type="text" name="label"
                        value="{{ r.label or '' }}" placeholder="например, отдел продаж">
-        </td>
-        <td class="text-end">
+            </td>
+            <td>
+                <select class="form-select form-select-sm" name="kind">
+                    <option value="all"     {% if r.kind == 'all'     %}selected{% endif %}>📬 Всё</option>
+                    <option value="orders"  {% if r.kind == 'orders'  %}selected{% endif %}>🛒 Только заказы</option>
+                    <option value="reports" {% if r.kind == 'reports' %}selected{% endif %}>📋 Только отчёты</option>
+                </select>
+            </td>
+            <td class="text-end">
                 <button class="btn btn-primary btn-sm">Сохранить</button>
-            </form>
-            <form action="{{ url_for('email_recipient_del', rid=r.id) }}" method="post"
-                  class="d-inline ms-1"
-                  onsubmit="return confirm('Удалить адрес «{{ r.email }}»?');">
-                <button class="btn btn-outline-danger btn-sm">🗑</button>
-            </form>
-        </td>
+        </form>
+                <form action="{{ url_for('email_recipient_del', rid=r.id) }}" method="post"
+                      class="d-inline ms-1"
+                      onsubmit="return confirm('Удалить адрес «{{ r.email }}»?');">
+                    <button class="btn btn-outline-danger btn-sm">🗑</button>
+                </form>
+            </td>
     </tr>
     {% else %}
     <tr>
-        <td colspan="3" class="text-muted"><em>Список пуст — рассылка пойдёт только заказчику (если у него есть email).</em></td>
+        <td colspan="4" class="text-muted"><em>Список пуст — рассылки пойдут только заказчику (если у него есть email).</em></td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
 
 <h5 class="mt-4">➕ Добавить адрес</h5>
-<form action="{{ url_for('email_recipient_add') }}" method="post" class="d-flex gap-2" style="max-width: 800px;">
+<form action="{{ url_for('email_recipient_add') }}" method="post" class="d-flex gap-2" style="max-width: 1050px;">
     <input class="form-control form-control-sm" type="email" name="email" placeholder="email@example.com" required>
     <input class="form-control form-control-sm" type="text" name="label" placeholder="Назначение (необязательно)">
+    <select class="form-select form-select-sm" name="kind" style="max-width: 220px;">
+        <option value="all"     selected>📬 Всё</option>
+        <option value="orders">🛒 Только заказы</option>
+        <option value="reports">📋 Только отчёты</option>
+    </select>
     <button class="btn btn-success btn-sm">Добавить</button>
 </form>
 

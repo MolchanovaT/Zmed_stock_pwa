@@ -193,16 +193,21 @@ class CartItem(Base):
 
 
 class EmailRecipient(Base):
-    """Адресат рассылки уведомлений о заказах.
+    """Адресат рассылки уведомлений.
 
-    Раньше список лежал в ORDER_EMAIL_TO в .env, теперь редактируется
-    админом через Flask-админку на /email-recipients.
+    kind:
+      'orders'  — только заказы из корзины;
+      'reports' — только отправленные отчёты об операциях;
+      'all'     — обе рассылки.
+
+    Редактируется админом через Flask-админку на /email-recipients.
     """
     __tablename__ = "email_recipients"
 
     id = Column(Integer, primary_key=True)
     email = Column(String, nullable=False, unique=True)
     label = Column(String, nullable=True)
+    kind = Column(String, nullable=False, default="all")
     created_at = Column(DateTime(timezone=True), nullable=False,
                         default=lambda: datetime.now(timezone.utc))
 

@@ -42,11 +42,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, func, select
 
+from fastapi.responses import StreamingResponse
+
 from app.api.activity import log_activity
 from app.api.scoping import OrgScope, require_org_scope, resolve_target_org_id
 from app.db.models import (
     ClinicStockBalance, ClinicStockItem, ClinicStockLocation,
-    ClinicStockMovement, OperationReport,
+    ClinicStockMovement, OperationReport, Organization,
 )
 from app.db.session import AsyncSessionLocal
 
@@ -503,6 +505,12 @@ async def transfer(body: TransferIn, scope: OrgScope = Depends(require_org_scope
             doc_number=body.doc_number, note=body.note,
         )
         await s.commit()
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_stock_transfer",
+        {"item_id": item.id, "qty": body.quantity,
+         "from": from_loc.id, "to": to_loc.id},
+    ))
     return {"movement_id": mov.id}
 
 
@@ -529,6 +537,12 @@ async def consume(body: ConsumeIn, scope: OrgScope = Depends(require_org_scope))
             doc_number=body.doc_number, note=body.note,
         )
         await s.commit()
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_stock_consume",
+        {"item_id": item.id, "qty": body.quantity, "from": from_loc.id,
+         "report_id": body.operation_report_id},
+    ))
     return {"movement_id": mov.id}
 
 
@@ -553,6 +567,12 @@ async def return_item(body: ReturnIn, scope: OrgScope = Depends(require_org_scop
             doc_number=body.doc_number, note=body.note,
         )
         await s.commit()
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_stock_return",
+        {"item_id": item.id, "qty": body.quantity,
+         "from": from_loc.id, "to": to_loc.id},
+    ))
     return {"movement_id": mov.id}
 
 
@@ -593,6 +613,12 @@ async def inventory(body: InventoryIn, scope: OrgScope = Depends(require_org_sco
             note=body.note,
         )
         await s.commit()
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_stock_inventory",
+        {"item_id": item.id, "location_id": body.location_id,
+         "actual": body.actual_quantity, "delta": delta},
+    ))
     return {"movement_id": mov.id, "delta": delta}
 
 
@@ -611,6 +637,12 @@ async def write_off(body: WriteOffIn, scope: OrgScope = Depends(require_org_scop
             note=body.note,
         )
         await s.commit()
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_stock_write_off",
+        {"item_id": item.id, "qty": body.quantity,
+         "from": from_loc.id, "note": body.note},
+    ))
     return {"movement_id": mov.id}
 
 
@@ -637,25 +669,141 @@ async def list_movements(
     return {"movements": [_ser_movement(m) for m in movs]}
 
 
+async def _losses_query(scope: OrgScope, date_from: Optional[str],
+                         date_to: Optional[str], session) -> list[tuple]:
+    """Возвращает список (movement, item, organization_name) по фильтрам потерь."""
+    stmt = (
+        select(ClinicStockMovement, ClinicStockItem, Organization)
+        .join(ClinicStockItem, ClinicStockItem.id == ClinicStockMovement.item_id)
+        .join(Organization, Organization.id == ClinicStockMovement.organization_id)
+        .where(ClinicStockMovement.kind.in_(LOSS_KINDS))
+        .order_by(ClinicStockMovement.id.desc())
+        .limit(2000)
+    )
+    if scope.organization_id is not None:
+        stmt = stmt.where(ClinicStockMovement.organization_id == scope.organization_id)
+    if date_from:
+        stmt = stmt.where(
+            ClinicStockMovement.created_at >= datetime.fromisoformat(_parse_iso_date(date_from))
+        )
+    if date_to:
+        dt = datetime.fromisoformat(_parse_iso_date(date_to))
+        stmt = stmt.where(
+            ClinicStockMovement.created_at <
+            dt.replace(hour=23, minute=59, second=59)
+        )
+    return (await session.execute(stmt)).all()
+
+
 @router.get("/losses")
 async def losses(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     scope: OrgScope = Depends(require_org_scope),
 ):
-    """Движения, которые ZMed трактует как «потери»:
-       inventory_adjust с delta<0 и write_off, не привязанные к отчёту об операции."""
+    """Потери — enriched-ответ: movement + item + organization_name.
+
+    Включаем:
+      - write_off (всегда минус);
+      - inventory_adjust с отрицательным delta — реальная недостача;
+      - inventory_adjust с положительным delta — «нашли», информативно.
+    """
     async with AsyncSessionLocal() as s:
-        stmt = select(ClinicStockMovement).where(
-            ClinicStockMovement.kind.in_(LOSS_KINDS),
-        ).order_by(ClinicStockMovement.id.desc()).limit(1000)
-        if scope.organization_id is not None:
-            stmt = stmt.where(ClinicStockMovement.organization_id == scope.organization_id)
-        if date_from:
-            stmt = stmt.where(ClinicStockMovement.created_at >= datetime.fromisoformat(_parse_iso_date(date_from)))
-        if date_to:
-            dt = datetime.fromisoformat(_parse_iso_date(date_to))
-            stmt = stmt.where(ClinicStockMovement.created_at < dt.replace(hour=23, minute=59, second=59))
-        movs = list((await s.execute(stmt)).scalars().all())
-    # inventory_adjust: отрицательные delta — потери; положительные (нашли) оставляем видимыми
-    return {"movements": [_ser_movement(m) for m in movs]}
+        rows = await _losses_query(scope, date_from, date_to, s)
+    out = []
+    for mov, item, org in rows:
+        out.append({
+            **_ser_movement(mov),
+            "organization_name": org.name,
+            "item": {
+                "id": item.id,
+                "article": item.article,
+                "nomenclature": item.nomenclature,
+                "characteristic": item.characteristic,
+                "lot_number": item.lot_number,
+                "expiration_date": item.expiration_date,
+            },
+        })
+    return {"movements": out}
+
+
+@router.get("/losses.xlsx")
+async def losses_xlsx(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """XLSX-экспорт потерь (write_off + inventory_adjust)."""
+    import io
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    async with AsyncSessionLocal() as s:
+        rows = await _losses_query(scope, date_from, date_to, s)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Потери"
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill("solid", fgColor="9A2A3A")
+    center = Alignment(horizontal="center", vertical="center")
+    thin = Side(style="thin", color="AAAAAA")
+    brd = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    headers = [
+        "Дата", "Клиника", "Тип", "Артикул", "Номенклатура",
+        "Lot", "Срок", "Кол-во", "Отчёт", "Заметка",
+    ]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.font, c.fill, c.alignment, c.border = hdr_font, hdr_fill, center, brd
+    ws.row_dimensions[1].height = 20
+
+    kind_label = {"write_off": "Списание", "inventory_adjust": "Инвентаризация"}
+    for i, (mov, item, org) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1,
+                value=mov.created_at.strftime("%Y-%m-%d %H:%M") if mov.created_at else "")
+        ws.cell(row=i, column=2, value=org.name)
+        ws.cell(row=i, column=3, value=kind_label.get(mov.kind, mov.kind))
+        ws.cell(row=i, column=4, value=item.article)
+        ws.cell(row=i, column=5, value=item.nomenclature)
+        ws.cell(row=i, column=6, value=item.lot_number or "")
+        ws.cell(row=i, column=7, value=item.expiration_date or "")
+        ws.cell(row=i, column=8, value=mov.quantity).alignment = center
+        ws.cell(row=i, column=9,
+                value=f"#{mov.operation_report_id}" if mov.operation_report_id else "")
+        ws.cell(row=i, column=10, value=mov.note or "")
+        for col in range(1, 11):
+            ws.cell(row=i, column=col).border = brd
+
+    widths = [18, 28, 15, 18, 36, 14, 14, 10, 10, 36]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[chr(64 + col)].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = "clinic_losses.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/organizations-list")
+async def organizations_list(scope: OrgScope = Depends(require_org_scope)):
+    """Список клиник — для фильтра на странице потерь.
+
+    Для сотрудника ZMed — все активные клиники.
+    Для юзера клиники — только своя (фильтр всё равно будет принудительным).
+    """
+    async with AsyncSessionLocal() as s:
+        stmt = select(Organization).where(Organization.active == 1).order_by(Organization.name)
+        if not scope.is_zmed:
+            stmt = stmt.where(Organization.id == scope.user.organization_id)
+        orgs = (await s.execute(stmt)).scalars().all()
+    return {"organizations": [
+        {"id": o.id, "name": o.name, "kind": o.kind}
+        for o in orgs
+    ]}

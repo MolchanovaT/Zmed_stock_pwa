@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { getOrders } from '../api/cart'
+import { listReports } from '../api/clinic_reports'
 import OrderCard from '../components/OrderCard'
 
 /* ── SVG-иконки модулей ─────────────────────────────────────────────────── */
@@ -187,9 +188,11 @@ export default function HomePage() {
 
   const hasImplants = user?.modules?.includes('implants')
   const hasSupplies = user?.modules?.includes('supplies')
+  const hasReports  = user?.modules?.includes('clinic_reports')
   const canSeeOrders = hasImplants || hasSupplies
 
   const [orders, setOrders] = useState([])
+  const [reports, setReports] = useState([])
   useEffect(() => {
     if (!canSeeOrders) return
     getOrders()
@@ -197,7 +200,15 @@ export default function HomePage() {
       .catch(() => {})
   }, [canSeeOrders])
 
+  useEffect(() => {
+    if (!hasReports) return
+    listReports({ limit: 5 })
+      .then((data) => setReports(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [hasReports])
+
   const recentOrders = orders.slice(0, 5)
+  const recentReports = reports.slice(0, 5)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -261,6 +272,41 @@ export default function HomePage() {
               </button>
             ))}
           </div>
+        )}
+
+        {hasReports && recentReports.length > 0 && (
+          <section className="mt-10">
+            <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+              <h2 className="text-lg font-bold text-gray-800">Последние отчёты</h2>
+              <button onClick={() => navigate('/clinic-reports')}
+                      className="text-sm font-medium text-rose-600 hover:text-rose-700">
+                Все отчёты →
+              </button>
+            </div>
+            <div className="space-y-2">
+              {recentReports.map((r) => (
+                <button key={r.id}
+                        onClick={() => navigate(`/clinic-reports/${r.id}`)}
+                        className="block w-full text-left bg-white rounded-xl border hover:border-rose-300 hover:shadow p-3 transition">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="font-medium text-gray-800 text-sm">
+                      #{r.id} · {r.operation_date} · {r.operation_type}
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      r.status === 'draft'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-emerald-100 text-emerald-800'
+                    }`}>
+                      {r.status === 'draft' ? 'Черновик' : 'Отправлен'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    👨‍⚕️ {r.doctor_name} · 🧾 {r.patient_code}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {canSeeOrders && recentOrders.length > 0 && (

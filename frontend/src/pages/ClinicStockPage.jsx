@@ -165,6 +165,10 @@ export default function ClinicStockPage() {
                   }`}>Локации</button>
 
           <div className="ml-auto flex gap-2 flex-wrap">
+            <button onClick={() => navigate('/clinic-stock/losses')}
+                    className="bg-rose-600 hover:bg-rose-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
+              🚨 Потери
+            </button>
             <button onClick={() => navigate('/clinic-stock/scan')}
                     className="bg-sky-600 hover:bg-sky-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
               📷 Сканировать

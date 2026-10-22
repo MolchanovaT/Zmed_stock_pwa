@@ -17,7 +17,11 @@ from app.tools.zip_helper import extract_zip
 from functools import wraps
 from flask import abort
 
-from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient, Organization
+from app.db.models import (
+    User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient,
+    Organization, OperationReport, OperationReportFile,
+)
+from flask import send_file, abort as flask_abort
 from app.db.models_stats import TgUser, Interaction  # noqa: F401  -- регистрируем модели в Base.metadata
 from app.tools.import_supplies import load_supplies_file
 
@@ -705,18 +709,25 @@ def email_recipients():
     return render_template("email_recipients.html", recipients=items)
 
 
+EMAIL_KINDS = ("all", "orders", "reports")
+
+
 @app.post("/email-recipients/add")
 @login_required
 def email_recipient_add():
     email = (request.form.get("email") or "").strip().lower()
     label = (request.form.get("label") or "").strip() or None
+    kind  = (request.form.get("kind") or "all").strip()
     if not email or "@" not in email:
         flash("Укажите корректный email.", "error")
+        return redirect(url_for("email_recipients"))
+    if kind not in EMAIL_KINDS:
+        flash("Неверный тип рассылки.", "error")
         return redirect(url_for("email_recipients"))
     if db_session.query(EmailRecipient).filter_by(email=email).first():
         flash(f"Адрес «{email}» уже в списке.", "warning")
         return redirect(url_for("email_recipients"))
-    db_session.add(EmailRecipient(email=email, label=label))
+    db_session.add(EmailRecipient(email=email, label=label, kind=kind))
     db_session.commit()
     flash(f"✅ Адрес «{email}» добавлен.", "success")
     return redirect(url_for("email_recipients"))
@@ -731,8 +742,12 @@ def email_recipient_edit(rid: int):
         return redirect(url_for("email_recipients"))
     new_email = (request.form.get("email") or "").strip().lower()
     new_label = (request.form.get("label") or "").strip() or None
+    new_kind  = (request.form.get("kind") or "all").strip()
     if not new_email or "@" not in new_email:
         flash("Укажите корректный email.", "error")
+        return redirect(url_for("email_recipients"))
+    if new_kind not in EMAIL_KINDS:
+        flash("Неверный тип рассылки.", "error")
         return redirect(url_for("email_recipients"))
     if new_email != r.email:
         if db_session.query(EmailRecipient).filter_by(email=new_email).first():
@@ -740,9 +755,104 @@ def email_recipient_edit(rid: int):
             return redirect(url_for("email_recipients"))
     r.email = new_email
     r.label = new_label
+    r.kind  = new_kind
     db_session.commit()
     flash("✅ Сохранено.", "success")
     return redirect(url_for("email_recipients"))
+
+
+@app.route("/admin-clinic-reports", methods=["GET"])
+@login_required
+def admin_clinic_reports():
+    """Список отчётов об операциях — админ ZMed видит все клиники."""
+    org_id = request.args.get("organization_id", type=int)
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+    status_f = request.args.get("status", "")
+
+    q = db_session.query(OperationReport).order_by(
+        OperationReport.operation_date.desc(), OperationReport.id.desc()
+    )
+    if org_id:
+        q = q.filter(OperationReport.organization_id == org_id)
+    if date_from:
+        q = q.filter(OperationReport.operation_date >= date_from)
+    if date_to:
+        q = q.filter(OperationReport.operation_date <= date_to)
+    if status_f:
+        q = q.filter(OperationReport.status == status_f)
+    reports = q.limit(500).all()
+
+    # file counts
+    file_counts = {}
+    if reports:
+        counts = db_session.query(
+            OperationReportFile.report_id, func.count(OperationReportFile.id)
+        ).filter(
+            OperationReportFile.report_id.in_([r.id for r in reports])
+        ).group_by(OperationReportFile.report_id).all()
+        file_counts = dict(counts)
+
+    orgs = db_session.query(Organization).filter_by(active=1).order_by(Organization.name).all()
+    org_map = {o.id: o for o in orgs}
+    users = {u.id: u for u in db_session.query(User).filter(
+        User.id.in_({r.user_id for r in reports} or {0})
+    ).all()}
+
+    return render_template(
+        "admin_clinic_reports.html",
+        reports=reports,
+        orgs=orgs, org_map=org_map, users=users,
+        file_counts=file_counts,
+        filters={"organization_id": org_id, "date_from": date_from,
+                 "date_to": date_to, "status": status_f},
+    )
+
+
+@app.route("/admin-clinic-reports/<int:report_id>", methods=["GET"])
+@login_required
+def admin_clinic_report_detail(report_id: int):
+    r = db_session.get(OperationReport, report_id)
+    if not r:
+        flash("Отчёт не найден.", "error")
+        return redirect(url_for("admin_clinic_reports"))
+
+    org = db_session.get(Organization, r.organization_id)
+    user = db_session.get(User, r.user_id)
+    files = db_session.query(OperationReportFile).filter_by(report_id=report_id).all()
+
+    implants = []
+    if r.implants_used_json:
+        try:
+            implants = json.loads(r.implants_used_json)
+        except (ValueError, TypeError):
+            implants = []
+
+    return render_template(
+        "admin_clinic_report_detail.html",
+        r=r, org=org, user=user, files=files, implants=implants,
+    )
+
+
+@app.route("/admin-clinic-reports/<int:report_id>/files/<int:file_id>")
+@login_required
+def admin_clinic_report_file(report_id: int, file_id: int):
+    """Отдаёт файл отчёта. Доступ — любому админу (is_superuser проверен глобально)."""
+    rec = db_session.get(OperationReportFile, file_id)
+    if not rec or rec.report_id != report_id:
+        flask_abort(404)
+    data_dir = os.getenv("REPORTS_DIR") or os.path.join(
+        os.path.dirname(__file__), "data", "reports"
+    )
+    disk_path = Path(data_dir).resolve() / rec.stored_path
+    if not disk_path.exists():
+        flask_abort(410)
+    return send_file(
+        str(disk_path),
+        mimetype=rec.content_type or "application/octet-stream",
+        as_attachment=False,
+        download_name=rec.original_name or f"file_{rec.id}",
+    )
 
 
 @app.post("/email-recipients/del/<int:rid>")
@@ -760,28 +870,46 @@ def email_recipient_del(rid: int):
 
 
 ACTION_LABELS = {
-    "login":       "Вход",
-    "search":      "Поиск",
-    "pdf_export":  "Экспорт PDF",
-    "add_to_cart": "В корзину",
-    "place_order": "Заказ",
-    "inn_check":   "Проверка ИНН",
+    "login":                   "Вход",
+    "search":                  "Поиск",
+    "pdf_export":              "Экспорт PDF",
+    "add_to_cart":             "В корзину",
+    "place_order":             "Заказ",
+    "inn_check":               "Проверка ИНН",
+    "clinic_report_create":    "Отчёт создан",
+    "clinic_report_update":    "Отчёт изменён",
+    "clinic_stock_receive":    "ОХ: приход",
+    "clinic_stock_transfer":   "ОХ: перемещение",
+    "clinic_stock_consume":    "ОХ: расход",
+    "clinic_stock_return":     "ОХ: возврат",
+    "clinic_stock_inventory":  "ОХ: инвент.",
+    "clinic_stock_write_off":  "ОХ: списание",
 }
 
 ACTION_COLORS = {
-    "login":       "primary",
-    "search":      "success",
-    "pdf_export":  "warning",
-    "add_to_cart": "info",
-    "place_order": "danger",
-    "inn_check":   "secondary",
+    "login":                   "primary",
+    "search":                  "success",
+    "pdf_export":              "warning",
+    "add_to_cart":             "info",
+    "place_order":             "danger",
+    "inn_check":               "secondary",
+    "clinic_report_create":    "info",
+    "clinic_report_update":    "info",
+    "clinic_stock_receive":    "success",
+    "clinic_stock_transfer":   "primary",
+    "clinic_stock_consume":    "warning",
+    "clinic_stock_return":     "info",
+    "clinic_stock_inventory":  "secondary",
+    "clinic_stock_write_off":  "danger",
 }
 
 
 MODULE_LABELS = {
-    "implants":      "Импланты",
-    "implants_view": "Импланты (просмотр)",
-    "supplies":      "Расходники",
+    "implants":       "Импланты",
+    "implants_view":  "Импланты (просмотр)",
+    "supplies":       "Расходники",
+    "clinic_reports": "Отчёты клиник",
+    "clinic_stock":   "Учёт ОХ",
 }
 
 INN_STATUS_LABELS = {
@@ -832,15 +960,33 @@ def _format_detail(action: str, detail: dict) -> str:
         name = detail.get("name") or ""
         inn = detail.get("inn", "")
         return f"{org} {inn}" + (f" — {name}" if name else "") + f" → {status}"
+    if action in ("clinic_report_create", "clinic_report_update"):
+        parts = [f"Отчёт #{detail.get('report_id')}"]
+        if detail.get("status"):
+            parts.append(detail["status"])
+        if detail.get("organization_id"):
+            parts.append(f"ЛПУ#{detail['organization_id']}")
+        return " | ".join(parts)
+    if action.startswith("clinic_stock_"):
+        qty = detail.get("qty") or detail.get("delta")
+        parts = [f"item#{detail.get('item_id')}"]
+        if qty is not None:
+            parts.append(f"× {qty}")
+        for k in ("from", "to", "location_id", "report_id"):
+            if detail.get(k):
+                parts.append(f"{k}={detail[k]}")
+        return " | ".join(parts)
     return "—"
 
 
 MODULE_DISPLAY = {
-    "implants":      ("⚕️ Импланты (заказ)",     "primary"),
-    "implants_view": ("⚕️ Импланты (просмотр)",  "info"),
-    "supplies":      ("🔧 Расходники",            "success"),
-    "inn_check":     ("🔍 Проверка ИНН",          "secondary"),
-    "login":         ("🔑 Входы",                 "dark"),
+    "implants":       ("⚕️ Импланты (заказ)",     "primary"),
+    "implants_view":  ("⚕️ Импланты (просмотр)",  "info"),
+    "supplies":       ("🔧 Расходники",            "success"),
+    "inn_check":      ("🔍 Проверка ИНН",          "secondary"),
+    "clinic_reports": ("📋 Отчёты клиник",         "danger"),
+    "clinic_stock":   ("📦 Учёт ОХ",               "warning"),
+    "login":          ("🔑 Входы",                 "dark"),
 }
 
 
@@ -852,6 +998,10 @@ def _activity_module(action: str, detail: dict) -> str:
         return "implants"
     if action == "inn_check":
         return "inn_check"
+    if action.startswith("clinic_report"):
+        return "clinic_reports"
+    if action.startswith("clinic_stock"):
+        return "clinic_stock"
     # search / pdf_export — модуль хранится в detail
     return detail.get("module") or "implants"
 

@@ -42,10 +42,11 @@ from sqlalchemy import delete, select
 
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
+from app.api.email_report import send_report_notification
 from app.api.scoping import (
     OrgScope, require_org_scope, resolve_target_org_id,
 )
-from app.db.models import OperationReport, OperationReportFile, User
+from app.db.models import Organization, OperationReport, OperationReportFile, User
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/clinic-reports", tags=["clinic_reports"])
@@ -120,6 +121,30 @@ def _parse_iso_date(s: str) -> str:
             detail=f"operation_date должна быть в формате YYYY-MM-DD, получено: {s!r}",
         )
     return s
+
+
+async def _notify_submitted(report: OperationReport, scope: OrgScope,
+                             files_count: int) -> None:
+    """Отправить email-уведомление ZMed о submitted-отчёте. Fire-and-forget."""
+    async with AsyncSessionLocal() as s:
+        org = await s.get(Organization, report.organization_id)
+    org_name = org.name if org else f"org#{report.organization_id}"
+    asyncio.create_task(send_report_notification(
+        report_id=report.id,
+        organization_name=org_name,
+        patient_code=report.patient_code,
+        operation_date=report.operation_date,
+        department=report.department or "",
+        doctor_name=report.doctor_name,
+        operation_type=report.operation_type,
+        diagnosis_text=report.diagnosis_text or "",
+        implants_used_json=report.implants_used_json or "",
+        complications=report.complications or "",
+        notes=report.notes or "",
+        files_count=files_count,
+        submitted_by=scope.user.username or (scope.user.full_name or f"user:{scope.user_id}"),
+        submitted_at=(report.submitted_at.isoformat() if report.submitted_at else ""),
+    ))
 
 
 def _ensure_access_to_report(report: OperationReport, scope: OrgScope) -> None:
@@ -285,6 +310,8 @@ async def create_report(
         {"report_id": report.id, "status": report.status,
          "organization_id": target_org_id},
     ))
+    if report.status == "submitted":
+        await _notify_submitted(report, scope, files_count=0)
     return _serialize_report(report, [])
 
 
@@ -336,11 +363,13 @@ async def patch_report(
                 [i.model_dump() for i in body.implants_used], ensure_ascii=False
             ) if body.implants_used else None
 
+        just_submitted = False
         if body.status is not None:
             if body.status not in ALLOWED_STATUSES:
                 raise HTTPException(status_code=400, detail=f"Неизвестный status: {body.status}")
             if body.status == "submitted" and report.status == "draft":
                 report.submitted_at = datetime.now(timezone.utc)
+                just_submitted = True
             report.status = body.status
 
         s.add(report)
@@ -359,6 +388,8 @@ async def patch_report(
         "clinic_report_update",
         {"report_id": report.id, "status": report.status},
     ))
+    if just_submitted:
+        await _notify_submitted(report, scope, files_count=len(files))
     return _serialize_report(report, files)
 
 

@@ -44,3 +44,21 @@ export const listMovements = (params = {}) =>
 
 export const listLosses = (params = {}) =>
   client.get('/clinic-stock/losses', { params }).then((r) => r.data.movements)
+
+export const listOrganizationsForLosses = () =>
+  client.get('/clinic-stock/organizations-list').then((r) => r.data.organizations)
+
+/** Открыть XLSX-экспорт потерь (blob'ом с JWT). */
+export const downloadLossesXlsx = async (params = {}) => {
+  const resp = await client.get('/clinic-stock/losses.xlsx', {
+    params, responseType: 'blob',
+  })
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `clinic_losses_${new Date().toISOString().slice(0, 10)}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
