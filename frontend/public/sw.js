@@ -1,12 +1,15 @@
 // Service Worker для PWA
 // Стратегия: Network First (пробуем сеть, при ошибке — кэш)
+// v2 — после фичи клинических модулей, инвалидирует старый кэш
 
-const CACHE_NAME = 'zmed-stock-v1';
+const CACHE_NAME = 'zmed-stock-v2';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/icon.svg',
+  '/favicon.svg',
 ];
 
 // ── Установка: кэшируем статику ────────────────────────────────────────────────

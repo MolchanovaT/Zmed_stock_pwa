@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Фон во всю плитку — важно для maskable: контент внутри safe-зоны (центральные 80%) -->
+  <rect width="512" height="512" fill="#2c5f8a"/>
+  <!-- Медицинский крест в safe-зоне -->
+  <g transform="translate(256,256)" fill="#ffffff">
+    <rect x="-56" y="-168" width="112" height="336" rx="18"/>
+    <rect x="-168" y="-56" width="336" height="112" rx="18"/>
+  </g>
+  <!-- Небольшой акцент: буква "Z" в центре креста -->
+  <text x="256" y="296" text-anchor="middle"
+        font-family="Arial, sans-serif" font-size="88" font-weight="700"
+        fill="#2c5f8a">Z</text>
+</svg>

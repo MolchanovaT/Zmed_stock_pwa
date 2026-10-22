@@ -244,6 +244,12 @@ async def nightly_cleanup() -> None:
       2. pwa_activity     — старше PWA_ACTIVITY_RETAIN_DAYS дней
       3. carts + items    — оформленные заказы старше CARTS_RETAIN_DAYS дней
       4. VACUUM           — освобождаем реальное место на диске
+
+    Клинические данные НЕ чистим специально:
+      - operation_reports / operation_report_files — нужны для аудита и 1С-сверки;
+      - clinic_stock_movements — append-only журнал движений;
+      - clinic_stock_items / balances — реальный учёт.
+    Если потребуется архивация — делать отдельной политикой, не этим job'ом.
     """
     from datetime import timezone
     from sqlalchemy import text as sa_text
