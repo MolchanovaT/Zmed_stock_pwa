@@ -22,8 +22,10 @@ from app.api.stock import router as stock_router
 from app.api.cart import router as cart_router
 from app.api.supplies import router as supplies_router
 from app.api.inn_check import router as inn_check_router
+from app.api.clinic_analytics import router as clinic_analytics_router
 from app.api.clinic_reports import router as clinic_reports_router
 from app.api.clinic_stock import router as clinic_stock_router
+from app.api.otp import router as otp_router
 
 # ── CORS origins ───────────────────────────────────────────────────────────────
 _cors_raw = os.getenv("CORS_ORIGINS", "http://localhost:5173")
@@ -52,6 +54,8 @@ app.include_router(supplies_router)
 app.include_router(inn_check_router)
 app.include_router(clinic_reports_router)
 app.include_router(clinic_stock_router)
+app.include_router(clinic_analytics_router)
+app.include_router(otp_router)
 
 
 # Чистка pwa_activity перенесена в scheduler.py → nightly_cleanup() (03:00)

@@ -192,6 +192,27 @@ class CartItem(Base):
     available_balance = Column(Numeric)
 
 
+class OtpCode(Base):
+    """Одноразовый код для подтверждения действий (например, подписание отчёта).
+
+    purpose — произвольная строка, идентифицирующая действие
+    (напр. 'report_submit:42'). Один-user × один-purpose = только одна
+    активная запись (старые помечаются used или истекают).
+
+    code_hash — SHA-256(code + JWT_SECRET-соль). В БД сам код не хранится.
+    """
+    __tablename__ = "otp_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    purpose = Column(String, nullable=False)
+    code_hash = Column(String, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+
+
 class EmailRecipient(Base):
     """Адресат рассылки уведомлений.
 

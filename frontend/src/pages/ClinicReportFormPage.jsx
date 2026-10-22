@@ -7,6 +7,7 @@ import {
   suggestDoctors, suggestOperationTypes, openReportPdf,
   getReportAudit,
 } from '../api/clinic_reports'
+import { requestOtp } from '../api/otp'
 
 const AUDIT_LABEL = {
   submit: { text: 'Отправлен', cls: 'bg-emerald-100 text-emerald-800' },
@@ -52,6 +53,8 @@ export default function ClinicReportFormPage() {
   const fileInputRef = useRef(null)
   const [step, setStep] = useState(0)   // 0..4; используется только при canEdit
   const [audit, setAudit] = useState([])
+  // OTP-режим: если сервер отдал 400/401 с подсказкой — показываем модалку
+  const [otp, setOtp] = useState(null)   // {purpose, sentTo, code, pending}
 
   const canEdit = isNew || (form.status === 'draft')
 
@@ -191,13 +194,11 @@ export default function ClinicReportFormPage() {
     }
   }
 
-  const submit = async () => {
-    const err = validate(true)
-    if (err) { setError(err); return }
-    if (!window.confirm('После отправки отчёт нельзя будет редактировать. Отправить?')) return
+  const _doSubmit = async (otpCode = null) => {
     setSaving(true); setError('')
     try {
       const body = { ...buildBody(), status: 'submitted' }
+      if (otpCode) body.otp_code = otpCode
       if (isNew && !reportId) {
         const created = await createReport(body)
         navigate(`/clinic-reports/${created.id}`, { replace: true })
@@ -205,11 +206,54 @@ export default function ClinicReportFormPage() {
         await patchReport(reportId, body)
         setForm((f) => ({ ...f, status: 'submitted' }))
       }
+      setOtp(null)
+      return true
     } catch (e) {
-      setError(e.response?.data?.detail || 'Ошибка отправки')
+      const detail = e.response?.data?.detail || 'Ошибка отправки'
+      const status = e.response?.status
+      // Если сервер требует OTP (400/401 с характерной подсказкой) — показываем модалку
+      if ((status === 400 || status === 401)
+          && /OTP|код/i.test(String(detail))) {
+        const purpose = (isNew && !reportId)
+          ? `report_submit_new:unknown` // target_org_id сервер подставит сам
+          : `report_submit:${reportId}`
+        setOtp({ purpose, sentTo: null, code: '', pending: false, error: detail })
+      } else {
+        setError(detail)
+      }
+      return false
     } finally {
       setSaving(false)
     }
+  }
+
+  const submit = async () => {
+    const err = validate(true)
+    if (err) { setError(err); return }
+    if (!window.confirm('После отправки отчёт нельзя будет редактировать. Отправить?')) return
+    await _doSubmit()
+  }
+
+  const requestOtpCode = async () => {
+    if (!otp) return
+    setOtp({ ...otp, pending: true, error: '' })
+    try {
+      const r = await requestOtp(otp.purpose)
+      setOtp((prev) => ({ ...prev, sentTo: r.sent_to, pending: false, error: '' }))
+    } catch (e) {
+      setOtp((prev) => ({
+        ...prev, pending: false,
+        error: e.response?.data?.detail || 'Не удалось отправить код',
+      }))
+    }
+  }
+
+  const submitWithOtp = async () => {
+    if (!otp?.code?.trim()) {
+      setOtp({ ...otp, error: 'Введите код из email' })
+      return
+    }
+    await _doSubmit(otp.code.trim())
   }
 
   const removeDraft = async () => {
@@ -588,6 +632,53 @@ export default function ClinicReportFormPage() {
         {!isNew && canEdit && (
           <div className="text-xs text-gray-400">
             Отчёт черновик — PDF будет доступен после отправки.
+          </div>
+        )}
+
+        {/* OTP-модалка */}
+        {otp && (
+          <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl p-5 w-full max-w-md space-y-3">
+              <h3 className="font-semibold text-gray-800">
+                Подтверждение подписи
+              </h3>
+              <p className="text-sm text-gray-600">
+                Отправка отчёта требует подтверждения кодом из email.
+                Нажмите «Отправить код», затем введите 6 цифр из письма.
+              </p>
+              {otp.error && (
+                <div className="bg-red-50 text-red-700 rounded p-2 text-sm">
+                  {otp.error}
+                </div>
+              )}
+              <button
+                onClick={requestOtpCode}
+                disabled={otp.pending}
+                className="w-full bg-brand-600 hover:bg-brand-700 text-white rounded px-4 py-2 text-sm font-medium disabled:opacity-50"
+              >
+                {otp.sentTo ? 'Отправить код ещё раз' : (otp.pending ? '…' : 'Отправить код')}
+              </button>
+              {otp.sentTo && (
+                <p className="text-xs text-gray-500">Отправлено на {otp.sentTo}</p>
+              )}
+              <input
+                value={otp.code}
+                onChange={(e) => setOtp({ ...otp, code: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                placeholder="123456"
+                inputMode="numeric" autoComplete="one-time-code"
+                className="w-full border rounded px-3 py-2 text-center text-xl tracking-widest font-mono"
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setOtp(null)}
+                        className="flex-1 border rounded px-4 py-2 text-sm">
+                  Отмена
+                </button>
+                <button onClick={submitWithOtp} disabled={saving || !otp.code}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded px-4 py-2 text-sm font-medium disabled:opacity-50">
+                  {saving ? '…' : 'Подписать и отправить'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

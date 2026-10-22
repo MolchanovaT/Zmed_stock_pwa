@@ -61,6 +61,10 @@ export default function ClinicReportsPage() {
         <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
           <h1 className="text-xl font-bold text-gray-800">Отчёты</h1>
           <div className="flex gap-2 flex-wrap">
+            <Link to="/clinic-analytics"
+                  className="bg-sky-600 hover:bg-sky-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
+              📊 Аналитика
+            </Link>
             <button
               onClick={() => {
                 const params = {}

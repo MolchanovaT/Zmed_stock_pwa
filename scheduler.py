@@ -7,6 +7,7 @@ import re
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import shutil
@@ -353,10 +354,121 @@ def main() -> None:
         sched.add_job(process_supplies_folder, "interval", minutes=CRON_SUPPLIES)
     # Ночная чистка БД + VACUUM — раз в сутки в 03:00
     sched.add_job(nightly_cleanup, "cron", hour=3, minute=0)
+
+    # Напоминания о молчащих клиниках — рабочий день в 10:00 МСК.
+    sched.add_job(clinic_silence_check, "cron",
+                  day_of_week="mon-fri", hour=10, minute=0, timezone=str(MSK))
     sched.start()
 
     _print(f"🕒 Планировщик запущен — main:{CRON_MAIN} мин, remote:{CRON_REMOTE} мин.")
     loop.run_forever()
+
+
+CLINIC_SILENCE_DAYS = int(os.getenv("CLINIC_SILENCE_DAYS", "14"))
+
+
+async def clinic_silence_check() -> None:
+    """Раз в день (пн-пт в 10:00 МСК): собираем список клиник, у которых
+    за последние CLINIC_SILENCE_DAYS не было ни одного submitted-отчёта.
+    Шлём агрегированный email адресатам с kind in (reports, all).
+
+    Активные клиники (kind='clinic', active=1), в которых есть хотя бы один
+    пользователь — считаем «подключёнными»; остальные не трогаем.
+    """
+    from datetime import timezone as _tz
+    from sqlalchemy import func as _f
+    from sqlalchemy.orm import Session
+    from app.db.models import (
+        EmailRecipient, OperationReport, Organization, User,
+    )
+    from app.db.session import sync_engine
+    from app.config import (
+        SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER,
+    )
+
+    cutoff = datetime.now(_tz.utc) - timedelta(days=CLINIC_SILENCE_DAYS)
+
+    with Session(sync_engine) as s:
+        # Активные клиники с хотя бы одним пользователем
+        q = (s.query(Organization)
+              .filter(Organization.kind == "clinic", Organization.active == 1)
+              .join(User, User.organization_id == Organization.id)
+              .group_by(Organization.id))
+        clinics = q.all()
+
+        last_submit: dict[int, Optional[datetime]] = {}
+        for row in (s.query(OperationReport.organization_id,
+                             _f.max(OperationReport.submitted_at))
+                     .filter(OperationReport.status == "submitted")
+                     .group_by(OperationReport.organization_id).all()):
+            last_submit[row[0]] = row[1]
+
+        silent = []
+        for org in clinics:
+            ts = last_submit.get(org.id)
+            if ts is None or ts < cutoff:
+                silent.append({
+                    "name": org.name,
+                    "last": ts.strftime("%Y-%m-%d %H:%M") if ts else None,
+                })
+
+        if not silent:
+            _print("🤫 Все клиники с отчётами в пределах нормы.")
+            return
+
+        recipients = [
+            r.email.strip()
+            for r in s.query(EmailRecipient).filter(
+                EmailRecipient.kind.in_(("reports", "all"))
+            ).all()
+            if r.email and r.email.strip()
+        ]
+
+    if not recipients:
+        _print("🤫 Молчат клиник: %d, но некому слать (email_recipients пуст)."
+               % len(silent))
+        return
+    if not SMTP_HOST:
+        _print("🤫 Молчат клиник: %d, SMTP не настроен." % len(silent))
+        return
+
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    rows = []
+    for i, c in enumerate(silent, 1):
+        last = c["last"] or "никогда"
+        rows.append(f"<tr><td>{i}</td><td>{c['name']}</td><td>{last}</td></tr>")
+    html = f"""<html><body style="font-family:Arial,sans-serif;font-size:14px">
+<h3>Молчат {len(silent)} клиник (нет submitted-отчёта за ≥{CLINIC_SILENCE_DAYS} дней)</h3>
+<table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse">
+  <thead style="background:#f5f5f5"><tr><th>#</th><th>Клиника</th><th>Последний отчёт</th></tr></thead>
+  <tbody>{''.join(rows)}</tbody>
+</table>
+<p style="color:#888;font-size:12px">Автоматическое напоминание из ZMed Stock PWA.
+Порог молчания: CLINIC_SILENCE_DAYS={CLINIC_SILENCE_DAYS}.</p>
+</body></html>"""
+    plain = (
+        f"Молчат {len(silent)} клиник (нет submitted-отчёта за ≥{CLINIC_SILENCE_DAYS} дней):\n\n"
+        + "\n".join(f"{i}. {c['name']} — последний: {c['last'] or 'никогда'}"
+                     for i, c in enumerate(silent, 1))
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Молчат {len(silent)} клиник — напоминание"
+    msg["From"] = SMTP_FROM or SMTP_USER
+    msg["To"] = ", ".join(recipients)
+    msg.attach(MIMEText(plain, "plain", "utf-8"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(msg["From"], recipients, msg.as_string())
+        _print(f"🤫 Отправлено напоминание о {len(silent)} молчащих клиниках на {recipients}")
+    except Exception as e:                           # noqa: BLE001
+        _print(f"❌ clinic_silence_check: {e}")
 
 
 if __name__ == "__main__":

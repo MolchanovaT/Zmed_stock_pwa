@@ -43,7 +43,9 @@ from sqlalchemy import delete, select
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
 from app.api.email_report import send_report_notification
+from app.api.otp import consume_otp
 from app.api.rate_limit import upload_rate_limit
+from app.config import OTP_REQUIRED_FOR_SUBMIT
 from app.api.scoping import (
     OrgScope, require_org_scope, resolve_target_org_id,
 )
@@ -99,6 +101,9 @@ class ReportCreate(BaseModel):
     complications: Optional[str] = Field(None, max_length=2000)
     notes: Optional[str] = Field(None, max_length=2000)
     status: str = "draft"
+    # OTP для подписания (требуется только если OTP_REQUIRED_FOR_SUBMIT=1
+    # и status='submitted')
+    otp_code: Optional[str] = Field(None, max_length=12)
 
 
 class ReportPatch(BaseModel):
@@ -112,6 +117,9 @@ class ReportPatch(BaseModel):
     complications: Optional[str] = Field(None, max_length=2000)
     notes: Optional[str] = Field(None, max_length=2000)
     status: Optional[str] = None
+    # OTP для подписания (требуется только если OTP_REQUIRED_FOR_SUBMIT=1
+    # и status меняется на 'submitted' из draft)
+    otp_code: Optional[str] = Field(None, max_length=12)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -366,6 +374,14 @@ async def create_report(
     op_date = _parse_iso_date(body.operation_date)
     target_org_id = await resolve_target_org_id(scope, body.organization_id)
 
+    # OTP при сразу-submitted (клинический юзер; ZMed пропускаем)
+    if (body.status == "submitted"
+            and OTP_REQUIRED_FOR_SUBMIT
+            and not scope.is_zmed):
+        # purpose привязываем к target_org_id (отчёта ещё нет)
+        await consume_otp(scope.user, f"report_submit_new:{target_org_id}",
+                           body.otp_code or "")
+
     now = datetime.now(timezone.utc)
     report = OperationReport(
         organization_id=target_org_id,
@@ -458,6 +474,11 @@ async def patch_report(
             if body.status not in ALLOWED_STATUSES:
                 raise HTTPException(status_code=400, detail=f"Неизвестный status: {body.status}")
             if body.status == "submitted" and report.status == "draft":
+                # OTP: требуется только клинике, не ZMed
+                if OTP_REQUIRED_FOR_SUBMIT and not scope.is_zmed:
+                    await consume_otp(scope.user,
+                                       f"report_submit:{report.id}",
+                                       body.otp_code or "")
                 report.submitted_at = datetime.now(timezone.utc)
                 just_submitted = True
             report.status = body.status

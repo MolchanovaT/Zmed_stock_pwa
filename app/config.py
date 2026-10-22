@@ -86,5 +86,11 @@ SMTP_FROM: str = os.getenv("SMTP_FROM", "")
 # на отчёты и т.п. Если не задан — ссылка в tg-сообщении не ставится.
 PWA_BASE_URL: str = os.getenv("PWA_BASE_URL", "").rstrip("/")
 
+# Email-OTP подпись при отправке отчёта об операции.
+# По умолчанию выключен — соответствует текущему поведению (сразу submit).
+# Включите, когда юридически потребуется двухфакторное подтверждение подписи.
+OTP_REQUIRED_FOR_SUBMIT: bool = os.getenv("OTP_REQUIRED_FOR_SUBMIT", "0") in ("1", "true", "True", "yes")
+OTP_TTL_SECONDS: int = int(os.getenv("OTP_TTL_SECONDS", "600"))
+
 # ────────────────────────────────────────────────────────────────
 # Разное (можно добавить позже: LOG_LEVEL, SENTRY_DSN и т. д.)
