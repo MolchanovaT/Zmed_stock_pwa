@@ -611,6 +611,9 @@ def organizations():
 
     Используется для привязки пользователей через поле organization_id —
     это даёт row-level security в клинических модулях.
+
+    Передаёт в шаблон список InnLpu, которые ещё НЕ импортированы
+    как Organization — для одношагового создания клиники из справочника.
     """
     items = db_session.query(Organization).order_by(
         Organization.kind.desc(), Organization.name
@@ -620,9 +623,20 @@ def organizations():
         .filter(User.organization_id.isnot(None))
         .group_by(User.organization_id).all()
     )
+
+    # Неимпортированные ЛПУ — по ИНН и по названию
+    existing_inns  = {o.inn for o in items if o.inn}
+    existing_names = {o.name for o in items}
+    unimported_lpus = [
+        l for l in db_session.query(InnLpu).order_by(InnLpu.name).all()
+        if (l.inn or "").strip() not in existing_inns
+        and (l.name or "").strip() not in existing_names
+    ]
+
     return render_template("organizations.html",
                            organizations=items,
-                           user_counts=user_counts)
+                           user_counts=user_counts,
+                           unimported_lpus=unimported_lpus)
 
 
 @app.post("/organizations/add")
@@ -645,6 +659,40 @@ def organization_add():
     db_session.add(Organization(name=name, inn=inn, kind=kind, active=1))
     db_session.commit()
     flash(f"✅ Организация «{name}» добавлена.", "success")
+    return redirect(url_for("organizations"))
+
+
+@app.post("/organizations/import-from-lpu")
+@login_required
+def organization_import_from_lpu():
+    """Импорт клиники из справочника InnLpu: берём name+inn, kind='clinic'."""
+    lpu_id = request.form.get("lpu_id", type=int)
+    if not lpu_id:
+        flash("Выберите ЛПУ из списка.", "error")
+        return redirect(url_for("organizations"))
+
+    lpu = db_session.get(InnLpu, lpu_id)
+    if not lpu:
+        flash("ЛПУ не найдено.", "error")
+        return redirect(url_for("organizations"))
+
+    name = (lpu.name or "").strip()
+    inn = (lpu.inn or "").strip() or None
+    if not name:
+        flash("У выбранного ЛПУ пустое название.", "error")
+        return redirect(url_for("organizations"))
+
+    # Защита от дубликатов — и по имени, и по ИНН
+    if db_session.query(Organization).filter_by(name=name).first():
+        flash(f"Организация «{name}» уже есть.", "warning")
+        return redirect(url_for("organizations"))
+    if inn and db_session.query(Organization).filter_by(inn=inn).first():
+        flash(f"Организация с ИНН {inn} уже есть.", "warning")
+        return redirect(url_for("organizations"))
+
+    db_session.add(Organization(name=name, inn=inn, kind="clinic", active=1))
+    db_session.commit()
+    flash(f"✅ Клиника «{name}» импортирована из справочника ЛПУ.", "success")
     return redirect(url_for("organizations"))
 
 

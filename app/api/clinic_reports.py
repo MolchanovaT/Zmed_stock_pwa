@@ -36,7 +36,7 @@ from typing import Optional
 from fastapi import (
     APIRouter, Depends, File, HTTPException, Query, UploadFile, status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
@@ -46,6 +46,7 @@ from app.api.email_report import send_report_notification
 from app.api.scoping import (
     OrgScope, require_org_scope, resolve_target_org_id,
 )
+from app.api.tg_notify import send_report_tg_notification
 from app.db.models import Organization, OperationReport, OperationReportFile, User
 from app.db.session import AsyncSessionLocal
 
@@ -125,7 +126,7 @@ def _parse_iso_date(s: str) -> str:
 
 async def _notify_submitted(report: OperationReport, scope: OrgScope,
                              files_count: int) -> None:
-    """Отправить email-уведомление ZMed о submitted-отчёте. Fire-and-forget."""
+    """Email + TG-уведомления ZMed о submitted-отчёте. Fire-and-forget."""
     async with AsyncSessionLocal() as s:
         org = await s.get(Organization, report.organization_id)
     org_name = org.name if org else f"org#{report.organization_id}"
@@ -144,6 +145,15 @@ async def _notify_submitted(report: OperationReport, scope: OrgScope,
         files_count=files_count,
         submitted_by=scope.user.username or (scope.user.full_name or f"user:{scope.user_id}"),
         submitted_at=(report.submitted_at.isoformat() if report.submitted_at else ""),
+    ))
+    asyncio.create_task(send_report_tg_notification(
+        report_id=report.id,
+        organization_name=org_name,
+        operation_date=report.operation_date,
+        operation_type=report.operation_type,
+        patient_code=report.patient_code,
+        doctor_name=report.doctor_name,
+        files_count=files_count,
     ))
 
 
@@ -529,6 +539,155 @@ async def delete_file(
 
         await s.delete(rec)
         await s.commit()
+
+
+# ── XLSX-экспорт ────────────────────────────────────────────────────────────
+
+@router.get("/export.xlsx")
+async def export_reports_xlsx(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """XLSX с отчётами + сводной информацией об имплантах.
+
+    Два листа:
+      «Отчёты» — одна строка на отчёт (включает кол-во имплантов и файлов);
+      «Импланты» — развёрнутая таблица позиций.
+    """
+    import io
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    async with AsyncSessionLocal() as s:
+        stmt = (
+            select(OperationReport, Organization)
+            .join(Organization, Organization.id == OperationReport.organization_id)
+            .order_by(OperationReport.operation_date.desc(),
+                       OperationReport.id.desc())
+            .limit(5000)
+        )
+        if scope.organization_id is not None:
+            stmt = stmt.where(OperationReport.organization_id == scope.organization_id)
+        if date_from:
+            stmt = stmt.where(OperationReport.operation_date >= _parse_iso_date(date_from))
+        if date_to:
+            stmt = stmt.where(OperationReport.operation_date <= _parse_iso_date(date_to))
+        if status_filter:
+            if status_filter not in ALLOWED_STATUSES:
+                raise HTTPException(status_code=400, detail=f"status: {status_filter}")
+            stmt = stmt.where(OperationReport.status == status_filter)
+        rows = (await s.execute(stmt)).all()
+        report_ids = [r[0].id for r in rows]
+
+        file_counts: dict[int, int] = {}
+        if report_ids:
+            from sqlalchemy import func as _f
+            fc = await s.execute(
+                select(OperationReportFile.report_id,
+                       _f.count(OperationReportFile.id))
+                .where(OperationReportFile.report_id.in_(report_ids))
+                .group_by(OperationReportFile.report_id)
+            )
+            file_counts = dict(fc.all())
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Отчёты"
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill("solid", fgColor="9A2A3A")
+    center = Alignment(horizontal="center", vertical="center")
+    thin = Side(style="thin", color="AAAAAA")
+    brd = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    headers = [
+        "#", "Дата", "Клиника", "Код операции", "Отделение",
+        "Врач", "Тип операции", "Диагноз", "Статус",
+        "Имплантов (поз.)", "Файлов", "Создан", "Отправлен",
+        "Осложнения", "Заметки",
+    ]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.font, c.fill, c.alignment, c.border = hdr_font, hdr_fill, center, brd
+    ws.row_dimensions[1].height = 22
+
+    status_label = {"draft": "Черновик", "submitted": "Отправлен"}
+
+    for i, (rep, org) in enumerate(rows, start=2):
+        try:
+            implants = json.loads(rep.implants_used_json) if rep.implants_used_json else []
+        except (ValueError, TypeError):
+            implants = []
+        values = [
+            rep.id,
+            rep.operation_date,
+            org.name,
+            rep.patient_code,
+            rep.department or "",
+            rep.doctor_name,
+            rep.operation_type,
+            rep.diagnosis_text or "",
+            status_label.get(rep.status, rep.status),
+            len(implants),
+            file_counts.get(rep.id, 0),
+            rep.created_at.strftime("%Y-%m-%d %H:%M") if rep.created_at else "",
+            rep.submitted_at.strftime("%Y-%m-%d %H:%M") if rep.submitted_at else "",
+            rep.complications or "",
+            rep.notes or "",
+        ]
+        for col, val in enumerate(values, 1):
+            c = ws.cell(row=i, column=col, value=val)
+            c.border = brd
+
+    widths = [6, 12, 28, 16, 20, 22, 32, 36, 12, 10, 8, 18, 18, 36, 36]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[chr(64 + col)].width = w
+
+    # Второй лист — импланты развёрнуто
+    ws2 = wb.create_sheet("Импланты")
+    headers2 = [
+        "Отчёт #", "Дата", "Клиника", "Артикул", "Номенклатура",
+        "Кол-во", "Lot", "Серийник",
+    ]
+    for col, h in enumerate(headers2, 1):
+        c = ws2.cell(row=1, column=col, value=h)
+        c.font, c.fill, c.alignment, c.border = hdr_font, hdr_fill, center, brd
+    ws2.row_dimensions[1].height = 22
+
+    r2 = 2
+    for (rep, org) in rows:
+        try:
+            implants = json.loads(rep.implants_used_json) if rep.implants_used_json else []
+        except (ValueError, TypeError):
+            implants = []
+        for imp in implants:
+            vals2 = [
+                rep.id, rep.operation_date, org.name,
+                imp.get("article", ""),
+                imp.get("nomenclature", ""),
+                imp.get("qty", 1),
+                imp.get("lot_number", ""),
+                imp.get("serial", ""),
+            ]
+            for col, val in enumerate(vals2, 1):
+                c = ws2.cell(row=r2, column=col, value=val)
+                c.border = brd
+            r2 += 1
+
+    widths2 = [10, 12, 28, 18, 36, 10, 16, 20]
+    for col, w in enumerate(widths2, 1):
+        ws2.column_dimensions[chr(64 + col)].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = "clinic_reports.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Авто-подсказки (автокомплит) ─────────────────────────────────────────────

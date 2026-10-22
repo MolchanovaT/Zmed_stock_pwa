@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
-import { listReports } from '../api/clinic_reports'
+import { listReports, downloadReportsXlsx } from '../api/clinic_reports'
 
 const STATUS_LABEL = {
   draft: { text: 'Черновик', cls: 'bg-amber-100 text-amber-800' },
@@ -51,10 +51,24 @@ export default function ClinicReportsPage() {
       <main className="max-w-4xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
           <h1 className="text-xl font-bold text-gray-800">Отчёты</h1>
-          <Link to="/clinic-reports/new"
-                className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
-            + Новый отчёт
-          </Link>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                const params = {}
+                if (filterStatus) params.status = filterStatus
+                if (dateFrom) params.date_from = dateFrom
+                if (dateTo) params.date_to = dateTo
+                downloadReportsXlsx(params)
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm font-medium"
+            >
+              📥 XLSX
+            </button>
+            <Link to="/clinic-reports/new"
+                  className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
+              + Новый отчёт
+            </Link>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl border p-3 flex flex-wrap gap-3 items-end mb-4">

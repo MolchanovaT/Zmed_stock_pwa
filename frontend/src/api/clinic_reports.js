@@ -58,3 +58,18 @@ export const suggestDoctors = (q = '') =>
 export const suggestOperationTypes = (q = '') =>
   client.get('/clinic-reports/suggest/operation-types', { params: { q } })
     .then((r) => r.data.items)
+
+/** Скачать XLSX с отчётами (blob'ом, с JWT). */
+export const downloadReportsXlsx = async (params = {}) => {
+  const resp = await client.get('/clinic-reports/export.xlsx', {
+    params, responseType: 'blob',
+  })
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `clinic_reports_${new Date().toISOString().slice(0, 10)}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
