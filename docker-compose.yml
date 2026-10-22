@@ -19,7 +19,10 @@ services:
     container_name: stockbot2_implants_trash_scheduler
     command: python -m scheduler
     volumes:
+      # Код монтируется — rebuild не нужен при git pull правок scheduler/app
+      - ./app:/app/app
       - ./data:/app/data
+      - ./scheduler.py:/app/scheduler.py
     env_file: .env
     restart: always
 

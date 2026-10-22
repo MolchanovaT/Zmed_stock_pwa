@@ -19,3 +19,6 @@ export const getByDoctor = (params = {}) =>
 export const getByDepartment = (params = {}) =>
   client.get('/clinic-analytics/by-department', { params })
     .then((r) => r.data.items)
+
+export const getMyActivity = () =>
+  client.get('/clinic-analytics/my-activity').then((r) => r.data)

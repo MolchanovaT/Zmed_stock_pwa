@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import {
   listReports, downloadReportsXlsx, downloadReportsPdfZip, listTags, bulkTag,
@@ -13,6 +13,7 @@ const STATUS_LABEL = {
 export default function ClinicReportsPage() {
   const { user, signout } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [reports, setReports] = useState([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -82,10 +83,24 @@ export default function ClinicReportsPage() {
   }
 
   useEffect(() => {
+    listTags().then((tags) => {
+      setAvailableTags(tags)
+      // Поддержка pre-filled фильтра через ?tag=NAME (из HomePage-плашки и пр.)
+      const wantTagName = searchParams.get('tag')
+      if (wantTagName) {
+        const t = tags.find((x) => x.name === wantTagName)
+        if (t) setFilterTagId(String(t.id))
+      }
+    }).catch(() => {})
     refresh(false)
-    listTags().then(setAvailableTags).catch(() => {})
     /* eslint-disable-next-line */
   }, [])
+
+  // Перезагрузка при автоподстановке filterTagId из query-string
+  useEffect(() => {
+    if (filterTagId) refresh(false)
+    /* eslint-disable-next-line */
+  }, [filterTagId])
 
   return (
     <div className="min-h-screen bg-gray-50">

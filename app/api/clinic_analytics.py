@@ -177,9 +177,22 @@ async def by_clinic(
             )
         movs = list((await s.execute(q_mov)).scalars().all())
 
+    # Последний submitted отчёт на клинику — для health-индикации
+    async with AsyncSessionLocal() as s:
+        last_stmt = (
+            select(OperationReport.organization_id,
+                    func.max(OperationReport.submitted_at))
+            .where(OperationReport.status == "submitted")
+            .group_by(OperationReport.organization_id)
+        )
+        last_rows = (await s.execute(last_stmt)).all()
+    last_by_org = {oid: ts for oid, ts in last_rows}
+
+    now = datetime.utcnow()
     agg: dict[int, dict] = {
         o.id: {"organization_id": o.id, "name": o.name,
-                "reports": 0, "implants_total": 0, "losses_qty": 0}
+                "reports": 0, "implants_total": 0, "losses_qty": 0,
+                "last_report_at": None, "health": "no_data"}
         for o in orgs
     }
     for r in reports:
@@ -200,8 +213,66 @@ async def by_clinic(
             else:
                 a["losses_qty"] -= m.quantity
 
+    # Выставляем last_report_at и health_status
+    #   ok      — есть отчёт за последние 14 дней
+    #   warning — последний 15-30 дней назад
+    #   silent  — >30 дней или никогда
+    for oid, a in agg.items():
+        last = last_by_org.get(oid)
+        if last:
+            a["last_report_at"] = last.isoformat()
+            # last может быть offset-naive если sqlite хранит без TZ
+            delta_days = (now - last.replace(tzinfo=None)).days
+            if delta_days <= 14:
+                a["health"] = "ok"
+            elif delta_days <= 30:
+                a["health"] = "warning"
+            else:
+                a["health"] = "silent"
+        else:
+            a["health"] = "silent"
+
     items = sorted(agg.values(), key=lambda x: -x["reports"])
     return {"items": items}
+
+
+@router.get("/my-activity")
+async def my_activity(scope: OrgScope = Depends(require_org_scope)):
+    """KPI текущего scope за 7 и 30 дней + последний отчёт.
+
+    Клиника видит себя; ZMed без фильтра — суммарно по всем своим клиникам
+    (клиники kind='clinic', active=1).
+    """
+    from datetime import timedelta
+    today = date.today()
+    seven = (today - timedelta(days=7)).isoformat()
+    thirty = (today - timedelta(days=30)).isoformat()
+
+    async with AsyncSessionLocal() as s:
+        stmt = select(OperationReport).where(
+            OperationReport.status == "submitted",
+        )
+        if scope.organization_id is not None:
+            stmt = stmt.where(OperationReport.organization_id == scope.organization_id)
+        reports = list((await s.execute(stmt)).scalars().all())
+
+    reports_7d = sum(1 for r in reports if r.operation_date >= seven)
+    reports_30d = sum(1 for r in reports if r.operation_date >= thirty)
+    implants_30d = sum(
+        _implants_count(r.implants_used_json)
+        for r in reports if r.operation_date >= thirty
+    )
+
+    last_report_date: Optional[str] = None
+    if reports:
+        last_report_date = max(r.operation_date for r in reports)
+
+    return {
+        "reports_7d": reports_7d,
+        "reports_30d": reports_30d,
+        "implants_30d": implants_30d,
+        "last_report_date": last_report_date,
+    }
 
 
 @router.get("/top-operation-types")

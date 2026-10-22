@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { getOrders } from '../api/cart'
-import { listReports } from '../api/clinic_reports'
+import { listReports, listTags } from '../api/clinic_reports'
+import { getMyActivity, getByClinic } from '../api/clinic_analytics'
 import OrderCard from '../components/OrderCard'
+
+const HEALTH_META = {
+  ok:       { label: 'активна', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  warning:  { label: '15-30 дн', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  silent:   { label: '>30 дн / молчит', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  no_data:  { label: 'нет данных', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+}
 
 /* ── SVG-иконки модулей ─────────────────────────────────────────────────── */
 
@@ -193,6 +201,10 @@ export default function HomePage() {
 
   const [orders, setOrders] = useState([])
   const [reports, setReports] = useState([])
+  const [myActivity, setMyActivity] = useState(null)
+  const [clinicsHealth, setClinicsHealth] = useState([])
+  const [reviewCount, setReviewCount] = useState(0)   // F38
+
   useEffect(() => {
     if (!canSeeOrders) return
     getOrders()
@@ -205,10 +217,26 @@ export default function HomePage() {
     listReports({ limit: 5 })
       .then((data) => setReports(data?.reports || []))
       .catch(() => {})
+    getMyActivity().then(setMyActivity).catch(() => {})
+    // F40 — цветовая карта клиник. Пытаемся — если юзер не ZMed, бэкенд
+    // отдаст одну клинику (это ок).
+    getByClinic().then(setClinicsHealth).catch(() => {})
+    // F38 — счётчик «Требует разбора»
+    listTags().then(async (tags) => {
+      const t = tags.find((x) => x.name === 'Требует разбора')
+      if (!t) return
+      try {
+        const resp = await listReports({ tag_id: t.id, limit: 1 })
+        setReviewCount(resp?.total || 0)
+      } catch { /* ignore */ }
+    }).catch(() => {})
   }, [hasReports])
 
   const recentOrders = orders.slice(0, 5)
   const recentReports = reports.slice(0, 5)
+  // Показываем grid только если клиник больше одной (у клиники — 1 строка,
+  // ей это не нужно: KPI уже показан отдельно)
+  const showClinicsGrid = clinicsHealth.length > 1
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -272,6 +300,82 @@ export default function HomePage() {
               </button>
             ))}
           </div>
+        )}
+
+        {/* F38: уведомление «Требует разбора» */}
+        {hasReports && reviewCount > 0 && (
+          <button
+            onClick={() => navigate('/clinic-reports?tag=' + encodeURIComponent('Требует разбора'))}
+            className="mt-6 w-full flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900 hover:bg-amber-100 transition"
+          >
+            <span>
+              📝 Требует разбора: <strong>{reviewCount}</strong> отчёт(ов)
+            </span>
+            <span className="text-xs">Открыть →</span>
+          </button>
+        )}
+
+        {/* F39: KPI активности текущего scope */}
+        {hasReports && myActivity && (
+          <section className="mt-6 grid grid-cols-3 gap-2">
+            <div className="bg-white rounded-xl border p-3 text-center">
+              <div className="text-xs text-gray-500">За 7 дней</div>
+              <div className="text-2xl font-bold text-rose-600">
+                {myActivity.reports_7d}
+              </div>
+              <div className="text-xs text-gray-400">отчётов</div>
+            </div>
+            <div className="bg-white rounded-xl border p-3 text-center">
+              <div className="text-xs text-gray-500">За 30 дней</div>
+              <div className="text-2xl font-bold text-brand-600">
+                {myActivity.reports_30d}
+              </div>
+              <div className="text-xs text-gray-400">
+                импл: {myActivity.implants_30d}
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border p-3 text-center">
+              <div className="text-xs text-gray-500">Последний</div>
+              <div className="text-base font-semibold text-gray-700 mt-1">
+                {myActivity.last_report_date || '—'}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* F40: цветовая карта клиник (видна только ZMed-staff) */}
+        {hasReports && showClinicsGrid && (
+          <section className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700">
+                Клиники · статус за 30 дней
+              </h2>
+              <button onClick={() => navigate('/clinic-analytics')}
+                      className="text-xs text-brand-600 hover:text-brand-700">
+                Аналитика →
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {clinicsHealth.map((c) => {
+                const meta = HEALTH_META[c.health] || HEALTH_META.no_data
+                return (
+                  <div key={c.organization_id}
+                       className={`border rounded-lg p-3 text-sm ${meta.cls}`}>
+                    <div className="font-medium">{c.name}</div>
+                    <div className="flex justify-between text-xs mt-1 opacity-90">
+                      <span>{meta.label}</span>
+                      <span>
+                        отчётов: <strong>{c.reports}</strong>
+                        {c.losses_qty > 0 && (
+                          <> · потерь: <strong>{c.losses_qty}</strong></>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
         )}
 
         {hasReports && recentReports.length > 0 && (
