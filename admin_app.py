@@ -17,7 +17,7 @@ from app.tools.zip_helper import extract_zip
 from functools import wraps
 from flask import abort
 
-from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient
+from app.db.models import User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient, Organization
 from app.db.models_stats import TgUser, Interaction  # noqa: F401  -- регистрируем модели в Base.metadata
 from app.tools.import_supplies import load_supplies_file
 
@@ -123,7 +123,12 @@ def upload_file():
     users = db_session.query(User).order_by(
         User.username.is_(None), User.username, User.full_name
     ).all()
-    return render_template("upload.html", users=users)
+    organizations = db_session.query(Organization).order_by(
+        Organization.kind.desc(),  # 'zmed' раньше 'clinic'
+        Organization.name,
+    ).all()
+    return render_template("upload.html", users=users,
+                           organizations=organizations)
 
 
 # ─────────────────────────────
@@ -192,6 +197,7 @@ def create_admin_user():
 
 
 ALL_MODULES = ["implants", "implants_view", "supplies", "inn_check",
+               "clinic_reports", "clinic_stock",
                "bot_supplies", "bot_implants"]
 
 
@@ -210,6 +216,19 @@ def _normalize_tg_id(raw: str) -> int | None:
     return int(raw)
 
 
+def _parse_organization_id(form) -> int | None:
+    """Разбирает organization_id из формы. Пустая строка = None (без привязки)."""
+    raw = (form.get("organization_id") or "").strip()
+    if not raw:
+        return None
+    if not raw.isdigit():
+        return "INVALID"
+    org_id = int(raw)
+    if not db_session.get(Organization, org_id):
+        return "INVALID"
+    return org_id
+
+
 @app.post("/user/add")
 @login_required
 def user_add():
@@ -225,6 +244,11 @@ def user_add():
     tg_id = _normalize_tg_id(tg_id_raw)
     if tg_id == "INVALID":
         flash("tg_id должен быть числом.", "error")
+        return redirect(url_for("upload_file"))
+
+    org_id = _parse_organization_id(request.form)
+    if org_id == "INVALID":
+        flash("Выбрана неизвестная организация.", "error")
         return redirect(url_for("upload_file"))
 
     if not username and not tg_id:
@@ -249,6 +273,7 @@ def user_add():
 
     u = User(username=username, tg_id=tg_id, full_name=full_name, title=title,
              email=email,
+             organization_id=org_id,
              modules=_parse_modules(request.form),
              is_superuser=is_super, active=active)
     if password:
@@ -499,6 +524,11 @@ def user_edit(user_id: int):
         flash("tg_id должен быть числом.", "error")
         return redirect(url_for("upload_file"))
 
+    org_id = _parse_organization_id(request.form)
+    if org_id == "INVALID":
+        flash("Выбрана неизвестная организация.", "error")
+        return redirect(url_for("upload_file"))
+
     if username and not re.fullmatch(r'[a-zA-Z0-9_\-]+', username):
         flash("Логин: только латинские буквы, цифры, _ и -", "error")
         return redirect(url_for("upload_file"))
@@ -521,6 +551,7 @@ def user_edit(user_id: int):
     u.title = title
     u.email = email
     u.tg_id = tg_id
+    u.organization_id = org_id
     db_session.commit()
     flash("✅ Данные обновлены.", "success")
     return redirect(url_for("upload_file"))
@@ -564,6 +595,104 @@ def user_del(user_id: int):
     else:
         flash("Пользователь не найден.", "error")
     return redirect(url_for("upload_file"))
+
+
+# ─────────────────────────────
+# Организации (клиники + ZMed)
+
+@app.route("/organizations", methods=["GET"])
+@login_required
+def organizations():
+    """Справочник организаций: внутренняя ZMed + клиники.
+
+    Используется для привязки пользователей через поле organization_id —
+    это даёт row-level security в клинических модулях.
+    """
+    items = db_session.query(Organization).order_by(
+        Organization.kind.desc(), Organization.name
+    ).all()
+    user_counts = dict(
+        db_session.query(User.organization_id, func.count(User.id))
+        .filter(User.organization_id.isnot(None))
+        .group_by(User.organization_id).all()
+    )
+    return render_template("organizations.html",
+                           organizations=items,
+                           user_counts=user_counts)
+
+
+@app.post("/organizations/add")
+@login_required
+def organization_add():
+    name = (request.form.get("name") or "").strip()
+    inn  = (request.form.get("inn") or "").strip() or None
+    kind = (request.form.get("kind") or "").strip()
+
+    if not name:
+        flash("Укажите название организации.", "error")
+        return redirect(url_for("organizations"))
+    if kind not in ("zmed", "clinic"):
+        flash("Тип организации должен быть 'zmed' или 'clinic'.", "error")
+        return redirect(url_for("organizations"))
+    if db_session.query(Organization).filter_by(name=name).first():
+        flash(f"Организация «{name}» уже есть.", "warning")
+        return redirect(url_for("organizations"))
+
+    db_session.add(Organization(name=name, inn=inn, kind=kind, active=1))
+    db_session.commit()
+    flash(f"✅ Организация «{name}» добавлена.", "success")
+    return redirect(url_for("organizations"))
+
+
+@app.post("/organizations/edit/<int:org_id>")
+@login_required
+def organization_edit(org_id: int):
+    org = db_session.get(Organization, org_id)
+    if not org:
+        flash("Организация не найдена.", "error")
+        return redirect(url_for("organizations"))
+
+    name = (request.form.get("name") or "").strip()
+    inn  = (request.form.get("inn") or "").strip() or None
+    kind = (request.form.get("kind") or "").strip()
+    active = 1 if request.form.get("active") else 0
+
+    if not name:
+        flash("Укажите название организации.", "error")
+        return redirect(url_for("organizations"))
+    if kind not in ("zmed", "clinic"):
+        flash("Тип организации должен быть 'zmed' или 'clinic'.", "error")
+        return redirect(url_for("organizations"))
+    if name != org.name and db_session.query(Organization).filter_by(name=name).first():
+        flash(f"Название «{name}» уже занято.", "warning")
+        return redirect(url_for("organizations"))
+
+    org.name = name
+    org.inn = inn
+    org.kind = kind
+    org.active = active
+    db_session.commit()
+    flash("✅ Сохранено.", "success")
+    return redirect(url_for("organizations"))
+
+
+@app.post("/organizations/del/<int:org_id>")
+@login_required
+def organization_del(org_id: int):
+    org = db_session.get(Organization, org_id)
+    if not org:
+        flash("Организация не найдена.", "error")
+        return redirect(url_for("organizations"))
+    linked = db_session.query(User).filter_by(organization_id=org_id).count()
+    if linked:
+        flash(f"Нельзя удалить «{org.name}» — к ней привязано пользователей: {linked}. "
+              "Сначала перепривяжите или удалите их.", "error")
+        return redirect(url_for("organizations"))
+    name = org.name
+    db_session.delete(org)
+    db_session.commit()
+    flash(f"🗑 Организация «{name}» удалена.", "success")
+    return redirect(url_for("organizations"))
 
 
 # ─────────────────────────────

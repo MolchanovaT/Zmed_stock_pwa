@@ -1,0 +1,481 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { useAuth } from '../store/auth'
+import {
+  createReport, getReport, patchReport, deleteReport,
+  uploadReportFile, openReportFile, deleteReportFile,
+  suggestDoctors, suggestOperationTypes,
+} from '../api/clinic_reports'
+
+const emptyImplant = () => ({ article: '', nomenclature: '', qty: 1, lot_number: '', serial: '' })
+
+// Эвристика «похоже на ФИО»: ≥2 слов из 2+ букв с заглавной
+const looksLikePersonalName = (s) => {
+  if (!s) return false
+  const words = s.trim().split(/\s+/).filter((w) => /^[А-ЯЁA-Z][а-яёa-z-]{1,}$/.test(w))
+  return words.length >= 2
+}
+
+export default function ClinicReportFormPage() {
+  const { id } = useParams()
+  const isNew = id === 'new' || !id
+  const navigate = useNavigate()
+  const { user } = useAuth()
+
+  const [form, setForm] = useState({
+    patient_code: '',
+    operation_date: new Date().toISOString().slice(0, 10),
+    department: '',
+    doctor_name: '',
+    operation_type: '',
+    diagnosis_text: '',
+    complications: '',
+    notes: '',
+    implants_used: [emptyImplant()],
+    status: 'draft',
+  })
+  const [files, setFiles] = useState([])
+  const [reportId, setReportId] = useState(null)
+  const [loading, setLoading] = useState(!isNew)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [doctorSuggests, setDoctorSuggests] = useState([])
+  const [opTypeSuggests, setOpTypeSuggests] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef(null)
+
+  const canEdit = isNew || (form.status === 'draft')
+
+  // Загрузка существующего отчёта
+  useEffect(() => {
+    if (isNew) return
+    getReport(id)
+      .then((r) => {
+        setForm({
+          patient_code: r.patient_code,
+          operation_date: r.operation_date,
+          department: r.department || '',
+          doctor_name: r.doctor_name,
+          operation_type: r.operation_type,
+          diagnosis_text: r.diagnosis_text || '',
+          complications: r.complications || '',
+          notes: r.notes || '',
+          implants_used: r.implants_used?.length ? r.implants_used : [emptyImplant()],
+          status: r.status,
+        })
+        setFiles(r.files || [])
+        setReportId(r.id)
+      })
+      .catch((e) => setError(e.response?.data?.detail || 'Отчёт не найден'))
+      .finally(() => setLoading(false))
+  }, [id, isNew])
+
+  useEffect(() => {
+    suggestDoctors('').then(setDoctorSuggests).catch(() => {})
+    suggestOperationTypes('').then(setOpTypeSuggests).catch(() => {})
+  }, [])
+
+  const upd = (field, value) => setForm((f) => ({ ...f, [field]: value }))
+
+  const updImplant = (idx, field, value) => {
+    setForm((f) => {
+      const copy = f.implants_used.slice()
+      copy[idx] = { ...copy[idx], [field]: value }
+      return { ...f, implants_used: copy }
+    })
+  }
+  const addImplantRow = () =>
+    setForm((f) => ({ ...f, implants_used: [...f.implants_used, emptyImplant()] }))
+  const removeImplantRow = (idx) =>
+    setForm((f) => ({
+      ...f,
+      implants_used: f.implants_used.length <= 1 ? f.implants_used
+        : f.implants_used.filter((_, i) => i !== idx),
+    }))
+
+  const validate = (requireAllForSubmit = false) => {
+    if (!form.patient_code.trim()) return 'Укажите код операции'
+    if (!form.operation_date) return 'Укажите дату операции'
+    if (!form.doctor_name.trim()) return 'Укажите ФИО врача'
+    if (!form.operation_type.trim()) return 'Укажите тип операции'
+    if (requireAllForSubmit) {
+      // На submit — все обязательные уже проверены выше.
+      // Доп. правило: если implants_used заполнен — требуем nomenclature.
+      for (const imp of form.implants_used) {
+        if (imp.article || imp.nomenclature || imp.lot_number || imp.serial || imp.qty > 1) {
+          if (!imp.nomenclature.trim() && !imp.article.trim()) {
+            return 'В строке импланта укажите артикул или номенклатуру'
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  const buildBody = () => {
+    const implants = form.implants_used
+      .filter((i) => i.article || i.nomenclature || i.lot_number || i.serial)
+      .map((i) => ({
+        article: i.article.trim(),
+        nomenclature: i.nomenclature.trim(),
+        qty: Number(i.qty) || 1,
+        lot_number: (i.lot_number || '').trim(),
+        serial: (i.serial || '').trim(),
+      }))
+    return {
+      patient_code: form.patient_code.trim(),
+      operation_date: form.operation_date,
+      department: form.department.trim() || null,
+      doctor_name: form.doctor_name.trim(),
+      operation_type: form.operation_type.trim(),
+      diagnosis_text: form.diagnosis_text.trim() || null,
+      complications: form.complications.trim() || null,
+      notes: form.notes.trim() || null,
+      implants_used: implants,
+    }
+  }
+
+  const saveDraft = async () => {
+    const err = validate(false)
+    if (err) { setError(err); return }
+    setSaving(true); setError('')
+    try {
+      const body = { ...buildBody(), status: 'draft' }
+      if (isNew && !reportId) {
+        const created = await createReport(body)
+        setReportId(created.id)
+        navigate(`/clinic-reports/${created.id}`, { replace: true })
+      } else {
+        await patchReport(reportId, body)
+      }
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Ошибка сохранения')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const submit = async () => {
+    const err = validate(true)
+    if (err) { setError(err); return }
+    if (!window.confirm('После отправки отчёт нельзя будет редактировать. Отправить?')) return
+    setSaving(true); setError('')
+    try {
+      const body = { ...buildBody(), status: 'submitted' }
+      if (isNew && !reportId) {
+        const created = await createReport(body)
+        navigate(`/clinic-reports/${created.id}`, { replace: true })
+      } else {
+        await patchReport(reportId, body)
+        setForm((f) => ({ ...f, status: 'submitted' }))
+      }
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Ошибка отправки')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const removeDraft = async () => {
+    if (!reportId) { navigate('/clinic-reports'); return }
+    if (!window.confirm('Удалить этот черновик?')) return
+    try {
+      await deleteReport(reportId)
+      navigate('/clinic-reports')
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Ошибка удаления')
+    }
+  }
+
+  const onPickFiles = async (e) => {
+    if (!reportId) {
+      setError('Сначала сохраните черновик, потом прикрепляйте файлы')
+      e.target.value = ''
+      return
+    }
+    const picked = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (!picked.length) return
+    setUploading(true); setError('')
+    try {
+      for (const f of picked) {
+        const added = await uploadReportFile(reportId, f)
+        setFiles((prev) => [...prev, added])
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Ошибка загрузки файла')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const removeFile = async (fileId) => {
+    if (!window.confirm('Удалить этот файл?')) return
+    try {
+      await deleteReportFile(reportId, fileId)
+      setFiles((prev) => prev.filter((f) => f.id !== fileId))
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Ошибка удаления')
+    }
+  }
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-gray-400">Загрузка…</div>
+  }
+
+  const showPersonalWarning = looksLikePersonalName(form.patient_code)
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button onClick={() => navigate('/clinic-reports')}
+                  className="text-gray-500 hover:text-brand-600 text-sm">← Список</button>
+          <span className="text-xl ml-3">📋</span>
+          <span className="font-bold text-gray-800">
+            {isNew ? 'Новый отчёт' : `Отчёт #${reportId}`}
+          </span>
+          {!isNew && (
+            <span className={`ml-3 text-xs px-2 py-0.5 rounded-full font-medium
+              ${form.status === 'draft' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+              {form.status === 'draft' ? 'Черновик' : 'Отправлен'}
+            </span>
+          )}
+        </div>
+        <span className="text-sm text-gray-500">{user?.username}</span>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+        {error && (
+          <div className="bg-red-50 text-red-700 rounded p-3 text-sm">{error}</div>
+        )}
+
+        {/* Секция 1: об операции */}
+        <section className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-800">1. Об операции</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Код операции *</label>
+              <input value={form.patient_code} disabled={!canEdit}
+                     maxLength={32}
+                     onChange={(e) => upd('patient_code', e.target.value)}
+                     placeholder="OP-2026-00123"
+                     className="w-full border rounded px-3 py-2 text-sm"/>
+              {showPersonalWarning && (
+                <p className="text-xs text-amber-700 mt-1">
+                  ⚠️ Похоже на ФИО. Не вводите ПДн пациента — только обезличенный код.
+                </p>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                Любой обезличенный идентификатор. НЕ ФИО, НЕ дата рождения, НЕ адрес.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Дата операции *</label>
+              <input type="date" value={form.operation_date} disabled={!canEdit}
+                     onChange={(e) => upd('operation_date', e.target.value)}
+                     className="w-full border rounded px-3 py-2 text-sm"/>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Отделение</label>
+              <input value={form.department} disabled={!canEdit}
+                     maxLength={100}
+                     onChange={(e) => upd('department', e.target.value)}
+                     placeholder="нейрохирургия"
+                     className="w-full border rounded px-3 py-2 text-sm"/>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">ФИО врача *</label>
+              <input value={form.doctor_name} disabled={!canEdit}
+                     maxLength={100} list="doctor-suggests"
+                     onChange={(e) => upd('doctor_name', e.target.value)}
+                     className="w-full border rounded px-3 py-2 text-sm"/>
+              <datalist id="doctor-suggests">
+                {doctorSuggests.map((d) => <option key={d} value={d}/>)}
+              </datalist>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-gray-500 mb-1">Тип операции *</label>
+              <input value={form.operation_type} disabled={!canEdit}
+                     maxLength={200} list="op-type-suggests"
+                     onChange={(e) => upd('operation_type', e.target.value)}
+                     placeholder="напр.: Транспедикулярная фиксация"
+                     className="w-full border rounded px-3 py-2 text-sm"/>
+              <datalist id="op-type-suggests">
+                {opTypeSuggests.map((t) => <option key={t} value={t}/>)}
+              </datalist>
+            </div>
+          </div>
+        </section>
+
+        {/* Секция 2: диагноз */}
+        <section className="bg-white rounded-xl border p-5 space-y-3">
+          <h2 className="font-semibold text-gray-800">2. Диагноз</h2>
+          <textarea value={form.diagnosis_text} disabled={!canEdit}
+                    maxLength={500} rows={3}
+                    onChange={(e) => upd('diagnosis_text', e.target.value)}
+                    placeholder="Напр.: M51.1 Поражения межпозвоночных дисков поясничного отдела с радикулопатией"
+                    className="w-full border rounded px-3 py-2 text-sm"/>
+          <p className="text-xs text-gray-400">
+            Код МКБ-10 или краткая формулировка. Без ПДн пациента и анамнеза. До 500 символов.
+          </p>
+        </section>
+
+        {/* Секция 3: импланты */}
+        <section className="bg-white rounded-xl border p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-gray-800">3. Использованные импланты</h2>
+            {canEdit && (
+              <button onClick={addImplantRow}
+                      className="text-brand-600 hover:text-brand-700 text-sm font-medium">
+                + Добавить
+              </button>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 border-b">
+                  <th className="py-1 pr-2">Артикул</th>
+                  <th className="py-1 pr-2">Номенклатура</th>
+                  <th className="py-1 pr-2">Кол-во</th>
+                  <th className="py-1 pr-2">Lot</th>
+                  <th className="py-1 pr-2">Серийник</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.implants_used.map((imp, i) => (
+                  <tr key={i} className="border-b last:border-b-0">
+                    <td className="py-1 pr-2">
+                      <input value={imp.article} disabled={!canEdit}
+                             onChange={(e) => updImplant(i, 'article', e.target.value)}
+                             className="w-24 border rounded px-2 py-1 text-sm"/>
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input value={imp.nomenclature} disabled={!canEdit}
+                             onChange={(e) => updImplant(i, 'nomenclature', e.target.value)}
+                             className="w-full border rounded px-2 py-1 text-sm"/>
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input type="number" min={1} value={imp.qty} disabled={!canEdit}
+                             onChange={(e) => updImplant(i, 'qty', e.target.value)}
+                             className="w-16 border rounded px-2 py-1 text-sm"/>
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input value={imp.lot_number} disabled={!canEdit}
+                             onChange={(e) => updImplant(i, 'lot_number', e.target.value)}
+                             className="w-24 border rounded px-2 py-1 text-sm"/>
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input value={imp.serial} disabled={!canEdit}
+                             onChange={(e) => updImplant(i, 'serial', e.target.value)}
+                             className="w-28 border rounded px-2 py-1 text-sm"/>
+                    </td>
+                    <td className="py-1">
+                      {canEdit && form.implants_used.length > 1 && (
+                        <button onClick={() => removeImplantRow(i)}
+                                className="text-gray-400 hover:text-red-500 text-sm">✕</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Секция 4: осложнения и заметки */}
+        <section className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-800">4. Осложнения и заметки</h2>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Осложнения</label>
+            <textarea value={form.complications} disabled={!canEdit}
+                      maxLength={2000} rows={2}
+                      onChange={(e) => upd('complications', e.target.value)}
+                      className="w-full border rounded px-3 py-2 text-sm"/>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Заметки</label>
+            <textarea value={form.notes} disabled={!canEdit}
+                      maxLength={2000} rows={2}
+                      onChange={(e) => upd('notes', e.target.value)}
+                      className="w-full border rounded px-3 py-2 text-sm"/>
+          </div>
+        </section>
+
+        {/* Секция 5: файлы */}
+        <section className="bg-white rounded-xl border p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-gray-800">5. Фото и сканы</h2>
+            {canEdit && (
+              <>
+                <input ref={fileInputRef} type="file" multiple hidden
+                       accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+                       onChange={onPickFiles}/>
+                <button onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        className="text-brand-600 hover:text-brand-700 text-sm font-medium disabled:text-gray-400">
+                  {uploading ? 'Загрузка…' : '+ Прикрепить'}
+                </button>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-gray-400">
+            До 10 файлов, каждый до 20 МБ. JPG, PNG, WEBP, HEIC, PDF.
+            {isNew && !reportId && <> Сначала сохраните как черновик — после этого можно прикрепить файлы.</>}
+          </p>
+          {files.length === 0 ? (
+            <p className="text-sm text-gray-400">Файлов пока нет</p>
+          ) : (
+            <ul className="space-y-2">
+              {files.map((f) => (
+                <li key={f.id}
+                    className="flex items-center justify-between gap-3 bg-gray-50 rounded p-2 text-sm">
+                  <button
+                    onClick={() => openReportFile(reportId, f.id, f.original_name)}
+                    className="text-left truncate flex-1 hover:text-brand-700">
+                    📎 {f.original_name || `file_${f.id}`}
+                    <span className="text-xs text-gray-400 ml-2">
+                      {f.size_bytes ? `${Math.round(f.size_bytes / 1024)} КБ` : ''}
+                    </span>
+                  </button>
+                  {canEdit && (
+                    <button onClick={() => removeFile(f.id)}
+                            className="text-gray-400 hover:text-red-500">✕</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Кнопки */}
+        {canEdit && (
+          <div className="flex gap-3 flex-wrap">
+            <button onClick={saveDraft} disabled={saving}
+                    className="bg-white border border-brand-500 text-brand-600 hover:bg-brand-50 rounded-lg px-5 py-2 font-medium disabled:opacity-50">
+              💾 Сохранить черновик
+            </button>
+            <button onClick={submit} disabled={saving}
+                    className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-5 py-2 font-medium disabled:opacity-50">
+              ✅ Отправить
+            </button>
+            {!isNew && (
+              <button onClick={removeDraft} disabled={saving}
+                      className="ml-auto text-red-500 hover:text-red-600 text-sm">
+                🗑 Удалить черновик
+              </button>
+            )}
+          </div>
+        )}
+
+        {!canEdit && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-4 text-sm">
+            Этот отчёт отправлен и больше не редактируется.
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}

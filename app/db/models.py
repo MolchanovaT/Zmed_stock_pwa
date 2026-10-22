@@ -83,6 +83,26 @@ class AllowedUser(Base):
     title = Column(String, nullable=True)
 
 
+class Organization(Base):
+    """Организация-владелец данных для row-level security.
+
+    kind='zmed'   — внутренняя организация ZMed (сотрудники видят всё).
+    kind='clinic' — клиника; её юзеры видят только свои отчёты и свой ОХ-учёт.
+
+    inn — опциональная связь с existing inn_lpu (не FK, строкой — чтобы
+    не завязывать жизненный цикл двух таблиц).
+    """
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    inn = Column(String, nullable=True)
+    kind = Column(String, nullable=False, index=True)   # 'zmed' | 'clinic'
+    active = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+
+
 class User(Base, UserMixin):
     """Единая таблица пользователей: PWA-сайт + Telegram-боты.
 
@@ -92,11 +112,17 @@ class User(Base, UserMixin):
     Если заполнено и то, и то — один физический человек с двумя видами входа.
 
     modules: JSON-список разрешённых разделов.
-        PWA-сайт: implants, implants_view, supplies, inn_check
+        PWA-сайт: implants, implants_view, supplies, inn_check,
+                  clinic_reports, clinic_stock
         Боты:     bot_supplies, bot_implants
 
     is_superuser=1 нужен для входа в Flask-админку и страницу управления
     пользователями. Обычные PWA-юзеры ходят только в React на :8000.
+
+    organization_id — к какой организации принадлежит пользователь.
+    Для сотрудников ZMed — ссылка на организацию с kind='zmed'; они видят
+    данные всех клиник. Для юзеров клиник — ссылка на свою клинику;
+    они видят только данные своей организации.
     """
     __tablename__ = "users"
 
@@ -110,6 +136,8 @@ class User(Base, UserMixin):
     modules = Column(String, nullable=True)
     is_superuser = Column(Integer, nullable=False, default=0)
     active = Column(Integer, nullable=False, default=1)
+    organization_id = Column(Integer, ForeignKey("organizations.id"),
+                             nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False,
                         default=lambda: datetime.now(timezone.utc))
 
@@ -209,6 +237,58 @@ class InnPending(Base):
     date = Column(String, nullable=True)   # строка "YYYY-MM-DD"
     approved = Column(Integer, default=0)  # 1=одобрено
     denied = Column(Integer, default=0)    # 1=отклонено
+
+
+class OperationReport(Base):
+    """Отчёт клиники об операции (модуль clinic_reports).
+
+    ПДн пациента НЕ хранятся (решение по 152-ФЗ): patient_code — обезличенный
+    идентификатор, который клиника генерирует у себя (напр. "OP-2026-00123").
+    Связка "код → ФИО" остаётся в системе клиники.
+
+    doctor_name — ПДн врача, обрабатываются по договору поручения с клиникой.
+
+    status: 'draft' — черновик (виден только автору), 'submitted' — отправлен
+    (виден всем юзерам клиники + ZMed).
+    """
+    __tablename__ = "operation_reports"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"),
+                             nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    patient_code = Column(String(32), nullable=False)
+    operation_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    department = Column(String(100), nullable=True)
+    doctor_name = Column(String(100), nullable=False)
+    operation_type = Column(String(200), nullable=False)
+    diagnosis_text = Column(String(500), nullable=True)
+    implants_used_json = Column(Text, nullable=True)
+    complications = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="draft")
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class OperationReportFile(Base):
+    """Прикреплённый к отчёту файл: фото бумажного протокола / скан / фото UDI.
+
+    stored_path — путь внутри data/reports/ (напр. "2026/10/42_abc123.jpg").
+    Файлы отдаются ТОЛЬКО через FastAPI с проверкой доступа, не StaticFiles.
+    """
+    __tablename__ = "operation_report_files"
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("operation_reports.id"),
+                       nullable=False, index=True)
+    stored_path = Column(String, nullable=False)
+    original_name = Column(String, nullable=True)
+    content_type = Column(String, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False,
+                         default=lambda: datetime.now(timezone.utc))
 
 
 class PwaActivity(Base):

@@ -9,6 +9,8 @@ import OrdersPage from './pages/OrdersPage'
 import SuppliesPage from './pages/SuppliesPage'
 import ImplantsViewPage from './pages/ImplantsViewPage'
 import InnCheckPage from './pages/InnCheckPage'
+import ClinicReportsPage from './pages/ClinicReportsPage'
+import ClinicReportFormPage from './pages/ClinicReportFormPage'
 
 export default function App() {
   return (
@@ -95,6 +97,32 @@ export default function App() {
             element={
               <ProtectedRoute requiredModule="inn_check">
                 <InnCheckPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Модуль: Отчёты клиник об операциях */}
+          <Route
+            path="/clinic-reports"
+            element={
+              <ProtectedRoute requiredModule="clinic_reports">
+                <ClinicReportsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/clinic-reports/new"
+            element={
+              <ProtectedRoute requiredModule="clinic_reports">
+                <ClinicReportFormPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/clinic-reports/:id"
+            element={
+              <ProtectedRoute requiredModule="clinic_reports">
+                <ClinicReportFormPage />
               </ProtectedRoute>
             }
           />

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Организации</title>
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+</head>
+<body class="p-4">
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">🏥 Организации</h2>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('upload_file') }}" class="btn btn-outline-secondary btn-sm">← К пользователям</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Выйти</a>
+    </div>
+</div>
+
+{% with m = get_flashed_messages(with_categories=true) %}
+{% for cat, txt in m %}
+<div class="alert alert-{{ 'danger' if cat=='error' else cat }} alert-dismissible fade show">
+    {{ txt }}
+    <button class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endwith %}
+
+<p class="text-muted small">
+    Привязка пользователя к организации определяет, какие данные ему видны
+    в клинических модулях (отчёты об операциях, учёт ОХ).
+    <strong>ZMed</strong> видит данные всех клиник; <strong>клиника</strong> видит только свои.
+</p>
+
+<table class="table table-sm table-bordered" style="max-width: 1100px;">
+    <thead class="table-light">
+    <tr>
+        <th style="width: 30%">Название</th>
+        <th style="width: 15%">Тип</th>
+        <th style="width: 15%">ИНН</th>
+        <th style="width: 10%">Активна</th>
+        <th style="width: 10%">Юзеров</th>
+        <th style="width: 20%"></th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for org in organizations %}
+    <tr>
+        <form action="{{ url_for('organization_edit', org_id=org.id) }}" method="post" class="m-0">
+            <td>
+                <input class="form-control form-control-sm" type="text" name="name"
+                       value="{{ org.name }}" required>
+            </td>
+            <td>
+                <select class="form-select form-select-sm" name="kind">
+                    <option value="zmed"   {% if org.kind == 'zmed'   %}selected{% endif %}>ZMed (внутр.)</option>
+                    <option value="clinic" {% if org.kind == 'clinic' %}selected{% endif %}>Клиника</option>
+                </select>
+            </td>
+            <td>
+                <input class="form-control form-control-sm" type="text" name="inn"
+                       value="{{ org.inn or '' }}" placeholder="7707XXXXXX">
+            </td>
+            <td class="text-center">
+                <div class="form-check d-inline-block">
+                    <input class="form-check-input" type="checkbox" name="active"
+                           id="org_active_{{ org.id }}" {% if org.active %}checked{% endif %}>
+                    <label class="form-check-label" for="org_active_{{ org.id }}"></label>
+                </div>
+            </td>
+            <td class="text-center">
+                {{ user_counts.get(org.id, 0) }}
+            </td>
+            <td class="text-end">
+                <button class="btn btn-primary btn-sm">Сохранить</button>
+        </form>
+                <form action="{{ url_for('organization_del', org_id=org.id) }}" method="post"
+                      class="d-inline ms-1"
+                      onsubmit="return confirm('Удалить организацию «{{ org.name }}»?');">
+                    <button class="btn btn-outline-danger btn-sm">🗑</button>
+                </form>
+            </td>
+    </tr>
+    {% else %}
+    <tr>
+        <td colspan="6" class="text-muted"><em>Список пуст — добавьте хотя бы ZMed и несколько клиник.</em></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h5 class="mt-4">➕ Добавить организацию</h5>
+<form action="{{ url_for('organization_add') }}" method="post" class="row g-2 align-items-end" style="max-width: 1100px;">
+    <div class="col-md-4">
+        <label class="form-label small mb-0">Название</label>
+        <input class="form-control form-control-sm" type="text" name="name"
+               placeholder="Напр.: ГКБ №1 им. Пирогова" required>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label small mb-0">Тип</label>
+        <select class="form-select form-select-sm" name="kind">
+            <option value="clinic" selected>Клиника</option>
+            <option value="zmed">ZMed (внутр.)</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label small mb-0">ИНН <span class="text-muted">(необязательно)</span></label>
+        <input class="form-control form-control-sm" type="text" name="inn" placeholder="7707XXXXXX">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-success btn-sm w-100">Добавить</button>
+    </div>
+</form>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

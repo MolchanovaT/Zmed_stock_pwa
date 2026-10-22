@@ -71,6 +71,39 @@ function IconTools() {
   )
 }
 
+function IconReport() {
+  return (
+    <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg"
+         className="w-8 h-8" stroke="white" strokeLinecap="round" strokeLinejoin="round">
+      {/* Планшет-отчёт */}
+      <rect x="10" y="6" width="24" height="32" rx="2" strokeWidth="2.5"/>
+      <rect x="16" y="4" width="12" height="6" rx="1" strokeWidth="2"/>
+      {/* Строки */}
+      <line x1="15" y1="18" x2="29" y2="18" strokeWidth="2"/>
+      <line x1="15" y1="24" x2="29" y2="24" strokeWidth="2"/>
+      <line x1="15" y1="30" x2="24" y2="30" strokeWidth="2"/>
+      {/* Галочка */}
+      <path d="M13 14 L15 16 L19 12" strokeWidth="2"/>
+    </svg>
+  )
+}
+
+function IconBox() {
+  return (
+    <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg"
+         className="w-8 h-8" stroke="white" strokeLinecap="round" strokeLinejoin="round">
+      {/* Коробка */}
+      <path d="M6 14 L22 6 L38 14 L38 32 L22 40 L6 32 Z" strokeWidth="2.5"/>
+      <path d="M6 14 L22 22 L38 14" strokeWidth="2.5"/>
+      <line x1="22" y1="22" x2="22" y2="40" strokeWidth="2.5"/>
+      {/* Штрихкод-намёк */}
+      <line x1="12" y1="26" x2="12" y2="34" strokeWidth="1.5"/>
+      <line x1="15" y1="26" x2="15" y2="34" strokeWidth="1.5"/>
+      <line x1="18" y1="26" x2="18" y2="34" strokeWidth="1.5"/>
+    </svg>
+  )
+}
+
 function IconSearch() {
   return (
     <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg"
@@ -123,6 +156,22 @@ const ALL_MODULES = [
     Icon: IconSearch,
     path: '/inn-check',
     color: 'from-violet-500 to-violet-600',
+  },
+  {
+    id: 'clinic_reports',
+    title: 'Отчёты об операциях',
+    description: 'Регистрация прошедших операций с фото/сканами отчётов',
+    Icon: IconReport,
+    path: '/clinic-reports',
+    color: 'from-rose-500 to-rose-600',
+  },
+  {
+    id: 'clinic_stock',
+    title: 'Учёт на ОХ',
+    description: 'Приход, расход и остатки имплантов на ответственном хранении',
+    Icon: IconBox,
+    path: '/clinic-stock',
+    color: 'from-amber-500 to-amber-600',
   },
 ]
 
