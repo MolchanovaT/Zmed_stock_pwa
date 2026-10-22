@@ -11,6 +11,8 @@ import ImplantsViewPage from './pages/ImplantsViewPage'
 import InnCheckPage from './pages/InnCheckPage'
 import ClinicReportsPage from './pages/ClinicReportsPage'
 import ClinicReportFormPage from './pages/ClinicReportFormPage'
+import ClinicStockPage from './pages/ClinicStockPage'
+import ClinicStockScanPage from './pages/ClinicStockScanPage'
 
 export default function App() {
   return (
@@ -123,6 +125,24 @@ export default function App() {
             element={
               <ProtectedRoute requiredModule="clinic_reports">
                 <ClinicReportFormPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Модуль: Учёт на ОХ (ответственное хранение в клинике) */}
+          <Route
+            path="/clinic-stock"
+            element={
+              <ProtectedRoute requiredModule="clinic_stock">
+                <ClinicStockPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/clinic-stock/scan"
+            element={
+              <ProtectedRoute requiredModule="clinic_stock">
+                <ClinicStockScanPage />
               </ProtectedRoute>
             }
           />

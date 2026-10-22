@@ -291,6 +291,87 @@ class OperationReportFile(Base):
                          default=lambda: datetime.now(timezone.utc))
 
 
+class ClinicStockLocation(Base):
+    """Место хранения внутри клиники: склад/операционный блок/др."""
+    __tablename__ = "clinic_stock_locations"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"),
+                             nullable=False, index=True)
+    name = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # 'warehouse' | 'surgery' | 'other'
+    active = Column(Integer, nullable=False, default=1)
+
+
+class ClinicStockItem(Base):
+    """Партия товара на ОХ: один article/lot = одна строка.
+
+    MVP: только импланты (связка с implant_stock.article). Инструменты —
+    отдельным решением позже, если понадобится.
+    """
+    __tablename__ = "clinic_stock_items"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"),
+                             nullable=False, index=True)
+    article = Column(String, nullable=False, index=True)
+    nomenclature = Column(String, nullable=False)
+    characteristic = Column(String, nullable=True)
+    barcode = Column(String, nullable=True, index=True)
+    lot_number = Column(String, nullable=True)
+    expiration_date = Column(String(10), nullable=True)  # YYYY-MM-DD
+    received_at = Column(DateTime(timezone=True), nullable=False,
+                         default=lambda: datetime.now(timezone.utc))
+    received_doc_number = Column(String, nullable=True)
+
+
+class ClinicStockBalance(Base):
+    """Остаток по партии в конкретной локации.
+
+    Пересчитывается в транзакции при каждом движении.
+    UNIQUE по (item_id, location_id).
+    """
+    __tablename__ = "clinic_stock_balances"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("clinic_stock_items.id"),
+                     nullable=False, index=True)
+    location_id = Column(Integer, ForeignKey("clinic_stock_locations.id"),
+                         nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+
+
+class ClinicStockMovement(Base):
+    """Журнал движений (append-only).
+
+    kind:
+      'receive'          — приход от ZMed (создаёт/пополняет item + баланс to_location)
+      'transfer'         — склад → операционная / между локациями
+      'consume'          — списание на операцию (opt. operation_report_id → H1)
+      'return'           — возврат неиспользованного на склад
+      'inventory_adjust' — коррекция по итогам инвентаризации
+      'write_off'        — списание (просрочка, повреждение)
+    """
+    __tablename__ = "clinic_stock_movements"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"),
+                             nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    item_id = Column(Integer, ForeignKey("clinic_stock_items.id"),
+                     nullable=False, index=True)
+    from_location_id = Column(Integer, ForeignKey("clinic_stock_locations.id"), nullable=True)
+    to_location_id   = Column(Integer, ForeignKey("clinic_stock_locations.id"), nullable=True)
+    quantity = Column(Integer, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    operation_report_id = Column(Integer, ForeignKey("operation_reports.id"),
+                                 nullable=True, index=True)
+    doc_number = Column(String, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, index=True,
+                        default=lambda: datetime.now(timezone.utc))
+
+
 class PwaActivity(Base):
     __tablename__ = "pwa_activity"
 
