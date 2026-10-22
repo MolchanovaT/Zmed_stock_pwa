@@ -103,3 +103,18 @@ async def send_report_tg_notification(
         f"{url_line}"
     )
     await _broadcast(text)
+
+
+async def send_tg_messages(chat_ids: list[int], text: str) -> None:
+    """Публичный хелпер: шлёт один текст набору chat_ids через @ZmedBot.
+    Используется из scheduler-напоминаний (F29) и других мест.
+
+    Молча ничего не делает если нет BOT_TOKEN_INN или пустой chat_ids.
+    """
+    token = BOT_TOKEN_INN
+    if not token or not chat_ids:
+        return
+    async with aiohttp.ClientSession() as session:
+        await asyncio.gather(*[
+            _send_one(session, token, cid, text) for cid in chat_ids
+        ])

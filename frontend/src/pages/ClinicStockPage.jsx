@@ -4,7 +4,7 @@ import { useAuth } from '../store/auth'
 import {
   listItems, listLocations, createLocation,
   receive, transfer, consume, returnItem, inventory, writeOff,
-  listMovements,
+  listMovements, downloadMovementsXlsx,
 } from '../api/clinic_stock'
 import { listReports } from '../api/clinic_reports'
 
@@ -296,6 +296,13 @@ export default function ClinicStockPage() {
 
         {/* ── Вкладка «Журнал» ────────────────────────────────────────── */}
         {tab === 'movements' && (
+          <>
+          <div className="flex justify-end mb-3">
+            <button onClick={() => downloadMovementsXlsx()}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
+              📥 XLSX
+            </button>
+          </div>
           <div className="bg-white rounded-xl border overflow-x-auto">
             {loading ? <div className="text-center text-gray-400 py-10">Загрузка…</div>
              : movements.length === 0 ? (
@@ -356,6 +363,7 @@ export default function ClinicStockPage() {
               </table>
              )}
           </div>
+          </>
         )}
 
         {/* ── Вкладка «Локации» ───────────────────────────────────────── */}

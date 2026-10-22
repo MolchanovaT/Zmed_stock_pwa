@@ -21,6 +21,10 @@ export const patchReport = (id, body) =>
 export const deleteReport = (id) =>
   client.delete(`/clinic-reports/${id}`)
 
+/** Создать новый draft как копию существующего отчёта. */
+export const copyReport = (id) =>
+  client.post(`/clinic-reports/${id}/copy`).then((r) => r.data)
+
 /** Загрузить один файл (image/pdf) к отчёту. */
 export const uploadReportFile = (reportId, file) => {
   const fd = new FormData()
@@ -62,6 +66,13 @@ export const listTags = () =>
 /** Переписать набор тегов отчёта. */
 export const setReportTags = (reportId, tagIds) =>
   client.put(`/clinic-reports/${reportId}/tags`, { tag_ids: tagIds })
+    .then((r) => r.data)
+
+/** Групповое действие: добавить или снять один тег у списка отчётов.
+ * mode: 'add' | 'remove'. */
+export const bulkTag = (reportIds, tagId, mode) =>
+  client.post('/clinic-reports/bulk-tag',
+    { report_ids: reportIds, tag_id: tagId, mode })
     .then((r) => r.data)
 
 export const suggestDoctors = (q = '') =>

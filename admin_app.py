@@ -1013,6 +1013,63 @@ def admin_clinic_report_detail(report_id: int):
     )
 
 
+@app.route("/admin-audit-log")
+@login_required
+def admin_audit_log():
+    """Общий журнал audit-событий по отчётам клиник (submit, edit, delete).
+
+    Фильтры: клиника, пользователь, действие, период. Показываются записи
+    даже для удалённых отчётов (report_id = NULL после cascade).
+    """
+    org_id = request.args.get("organization_id", type=int)
+    user_id = request.args.get("user_id", type=int)
+    action_f = (request.args.get("action") or "").strip()
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+
+    q = db_session.query(OperationReportAudit).order_by(
+        OperationReportAudit.id.desc()
+    ).limit(1000)
+    if org_id:
+        q = q.filter(OperationReportAudit.organization_id == org_id)
+    if user_id:
+        q = q.filter(OperationReportAudit.user_id == user_id)
+    if action_f:
+        q = q.filter(OperationReportAudit.action == action_f)
+    if date_from:
+        q = q.filter(OperationReportAudit.created_at >= datetime.strptime(date_from, "%Y-%m-%d"))
+    if date_to:
+        q = q.filter(OperationReportAudit.created_at < datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1))
+
+    entries = q.all()
+
+    orgs = db_session.query(Organization).order_by(Organization.name).all()
+    orgs_map = {o.id: o for o in orgs}
+
+    users_q = db_session.query(User).filter(
+        User.id.in_({e.user_id for e in entries} or {0})
+    ).all()
+    users_map = {u.id: u for u in users_q}
+
+    users_for_filter = db_session.query(User).filter(
+        User.id.in_(
+            db_session.query(OperationReportAudit.user_id).distinct()
+        )
+    ).order_by(User.username).all()
+
+    return render_template(
+        "admin_audit_log.html",
+        entries=entries,
+        orgs_map=orgs_map,
+        orgs=orgs,
+        users_map=users_map,
+        users_for_filter=users_for_filter,
+        actions=["submit", "edit_after_submit", "delete_submitted"],
+        filters={"organization_id": org_id, "user_id": user_id,
+                 "action": action_f, "date_from": date_from, "date_to": date_to},
+    )
+
+
 @app.route("/admin-clinic-reports/<int:report_id>/files/<int:file_id>")
 @login_required
 def admin_clinic_report_file(report_id: int, file_id: int):

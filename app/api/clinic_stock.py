@@ -758,6 +758,121 @@ async def losses(
     return {"movements": out}
 
 
+@router.get("/movements.xlsx")
+async def movements_xlsx(
+    kind: Optional[str] = Query(None),
+    item_id: Optional[int] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """XLSX-экспорт журнала движений с теми же фильтрами, что GET /movements."""
+    import io
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    if kind and kind not in ALLOWED_MOVEMENT_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind: {kind}")
+
+    async with AsyncSessionLocal() as s:
+        stmt = (
+            select(ClinicStockMovement, ClinicStockItem, Organization)
+            .join(ClinicStockItem, ClinicStockItem.id == ClinicStockMovement.item_id)
+            .join(Organization, Organization.id == ClinicStockMovement.organization_id)
+            .order_by(ClinicStockMovement.id.desc())
+            .limit(5000)
+        )
+        if scope.organization_id is not None:
+            stmt = stmt.where(ClinicStockMovement.organization_id == scope.organization_id)
+        if kind:
+            stmt = stmt.where(ClinicStockMovement.kind == kind)
+        if item_id:
+            stmt = stmt.where(ClinicStockMovement.item_id == item_id)
+        if date_from:
+            stmt = stmt.where(
+                ClinicStockMovement.created_at >= datetime.fromisoformat(_parse_iso_date(date_from))
+            )
+        if date_to:
+            dt = datetime.fromisoformat(_parse_iso_date(date_to))
+            stmt = stmt.where(
+                ClinicStockMovement.created_at < dt.replace(hour=23, minute=59, second=59)
+            )
+
+        rows = (await s.execute(stmt)).all()
+
+        # Карта локаций — для имени «откуда/куда»
+        loc_ids = {m.from_location_id for m, _, _ in rows if m.from_location_id} | \
+                   {m.to_location_id   for m, _, _ in rows if m.to_location_id}
+        locs_map: dict[int, ClinicStockLocation] = {}
+        if loc_ids:
+            loc_res = await s.execute(
+                select(ClinicStockLocation).where(ClinicStockLocation.id.in_(loc_ids))
+            )
+            locs_map = {l.id: l for l in loc_res.scalars().all()}
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Движения ОХ"
+
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill("solid", fgColor="2c5f8a")
+    center = Alignment(horizontal="center", vertical="center")
+    thin = Side(style="thin", color="AAAAAA")
+    brd = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    kind_label = {
+        "receive": "Приход", "transfer": "Перемещение",
+        "consume": "Расход", "return": "Возврат",
+        "inventory_adjust": "Инвентаризация", "write_off": "Списание",
+    }
+    headers = [
+        "Дата", "Клиника", "Тип", "Артикул", "Номенклатура",
+        "Lot", "Срок", "Откуда", "Куда", "Кол-во",
+        "Отчёт", "Документ", "Заметка",
+    ]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.font, c.fill, c.alignment, c.border = hdr_font, hdr_fill, center, brd
+    ws.row_dimensions[1].height = 20
+
+    for i, (mov, item, org) in enumerate(rows, start=2):
+        ws.cell(row=i, column=1,
+                value=mov.created_at.strftime("%Y-%m-%d %H:%M") if mov.created_at else "")
+        ws.cell(row=i, column=2, value=org.name)
+        ws.cell(row=i, column=3, value=kind_label.get(mov.kind, mov.kind))
+        ws.cell(row=i, column=4, value=item.article)
+        ws.cell(row=i, column=5, value=item.nomenclature)
+        ws.cell(row=i, column=6, value=item.lot_number or "")
+        ws.cell(row=i, column=7, value=item.expiration_date or "")
+        ws.cell(row=i, column=8,
+                value=locs_map[mov.from_location_id].name
+                if mov.from_location_id in locs_map else "")
+        ws.cell(row=i, column=9,
+                value=locs_map[mov.to_location_id].name
+                if mov.to_location_id in locs_map else "")
+        ws.cell(row=i, column=10, value=mov.quantity).alignment = center
+        ws.cell(row=i, column=11,
+                value=f"#{mov.operation_report_id}" if mov.operation_report_id else "")
+        ws.cell(row=i, column=12, value=mov.doc_number or "")
+        ws.cell(row=i, column=13, value=mov.note or "")
+        for col in range(1, 14):
+            ws.cell(row=i, column=col).border = brd
+
+    widths = [18, 28, 16, 18, 36, 14, 14, 20, 20, 10, 10, 16, 36]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[chr(64 + col)].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = "clinic_stock_movements.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/losses.xlsx")
 async def losses_xlsx(
     date_from: Optional[str] = Query(None),

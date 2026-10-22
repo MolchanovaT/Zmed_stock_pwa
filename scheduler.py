@@ -404,13 +404,25 @@ async def clinic_silence_check() -> None:
             last_submit[row[0]] = row[1]
 
         silent = []
+        # tg_ids_by_org — для F29 (TG-напоминание самой клинике)
+        tg_ids_by_org: dict[int, list[int]] = {}
         for org in clinics:
             ts = last_submit.get(org.id)
             if ts is None or ts < cutoff:
                 silent.append({
+                    "id": org.id,
                     "name": org.name,
                     "last": ts.strftime("%Y-%m-%d %H:%M") if ts else None,
                 })
+                tg_ids = [
+                    u.tg_id for u in s.query(User).filter(
+                        User.organization_id == org.id,
+                        User.active == 1,
+                        User.tg_id.isnot(None),
+                    ).all()
+                ]
+                if tg_ids:
+                    tg_ids_by_org[org.id] = tg_ids
 
         if not silent:
             _print("🤫 Все клиники с отчётами в пределах нормы.")
@@ -469,6 +481,32 @@ async def clinic_silence_check() -> None:
         _print(f"🤫 Отправлено напоминание о {len(silent)} молчащих клиниках на {recipients}")
     except Exception as e:                           # noqa: BLE001
         _print(f"❌ clinic_silence_check: {e}")
+
+    # F29: персональные TG-напоминания юзерам молчащих клиник.
+    if tg_ids_by_org:
+        try:
+            from app.api.tg_notify import send_tg_messages
+            tg_tasks = []
+            for c in silent:
+                ids = tg_ids_by_org.get(c["id"])
+                if not ids:
+                    continue
+                last_line = (f"Последний отчёт: {c['last']}" if c["last"]
+                              else "Отчётов пока не было")
+                msg_text = (
+                    f"⏰ <b>Напоминание</b>\n"
+                    f"За последние {CLINIC_SILENCE_DAYS} дней от клиники "
+                    f"<b>{c['name']}</b> не поступало отчётов об операциях.\n"
+                    f"{last_line}.\n\n"
+                    "Если прошли операции — внесите отчёт в PWA. "
+                    "Если вопросы — свяжитесь с менеджером ZMed."
+                )
+                tg_tasks.append(send_tg_messages(ids, msg_text))
+            if tg_tasks:
+                await asyncio.gather(*tg_tasks, return_exceptions=True)
+                _print(f"📱 TG-напоминание отправлено {len(tg_tasks)} клиникам.")
+        except Exception as e:                       # noqa: BLE001
+            _print(f"❌ clinic_silence_check TG: {e}")
 
 
 if __name__ == "__main__":

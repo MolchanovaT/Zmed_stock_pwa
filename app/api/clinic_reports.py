@@ -540,6 +540,53 @@ async def patch_report(
     return _serialize_report(report, files)
 
 
+@router.post("/{report_id}/copy", status_code=status.HTTP_201_CREATED)
+async def copy_report(
+    report_id: int,
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """Копирует отчёт в новый draft от имени текущего пользователя.
+
+    Копируются: patient_code, department, doctor_name, operation_type,
+    diagnosis_text, implants_used_json, complications.
+    НЕ копируются: notes (там обычно специфика конкретной операции),
+    files, tags, submitted_at, статус.
+
+    organization_id источника и копии совпадают — то есть сотрудник
+    клиники копирует только в свою клинику; ZMed-staff — в ту же клинику.
+    """
+    async with AsyncSessionLocal() as s:
+        src = await s.get(OperationReport, report_id)
+        _ensure_access_to_report(src, scope)
+
+        now = datetime.now(timezone.utc)
+        new = OperationReport(
+            organization_id=src.organization_id,
+            user_id=scope.user_id,
+            patient_code=src.patient_code,
+            operation_date=date.today().isoformat(),
+            department=src.department,
+            doctor_name=src.doctor_name,
+            operation_type=src.operation_type,
+            diagnosis_text=src.diagnosis_text,
+            implants_used_json=src.implants_used_json,
+            complications=src.complications,
+            notes=None,
+            status="draft",
+            created_at=now,
+        )
+        s.add(new)
+        await s.commit()
+        await s.refresh(new)
+
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_report_create",
+        {"report_id": new.id, "status": "draft", "copied_from": report_id},
+    ))
+    return _serialize_report(new, [], [])
+
+
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_report(
     report_id: int,
@@ -743,6 +790,69 @@ async def set_tags(
             s.add(OperationReportTag(report_id=report_id, tag_id=tid))
         await s.commit()
     return {"ok": True, "tag_ids": sorted(set(body.tag_ids))}
+
+
+class BulkTagRequest(BaseModel):
+    report_ids: list[int] = Field(..., min_length=1, max_length=500)
+    tag_id: int
+    mode: str = Field(..., pattern="^(add|remove)$")
+
+
+@router.post("/bulk-tag")
+async def bulk_tag(
+    body: BulkTagRequest,
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """Групповое действие: добавить/снять один тег у набора отчётов.
+
+    Правила доступа: для КАЖДОГО отчёта проверяется _ensure_can_edit;
+    пропущенные (нет доступа / чужой draft / submitted клинического юзера)
+    возвращаются в skipped.
+    """
+    async with AsyncSessionLocal() as s:
+        # Валидация тега
+        tag = await s.get(ReportTag, body.tag_id)
+        if tag is None or not tag.active:
+            raise HTTPException(status_code=400, detail="Тег не найден или архивный")
+
+        affected: list[int] = []
+        skipped: list[int] = []
+        for rid in set(body.report_ids):
+            report = await s.get(OperationReport, rid)
+            try:
+                _ensure_can_edit(report, scope)
+            except HTTPException:
+                skipped.append(rid)
+                continue
+            if body.mode == "add":
+                # Проверим, нет ли уже
+                exists = (await s.execute(
+                    select(OperationReportTag).where(
+                        OperationReportTag.report_id == rid,
+                        OperationReportTag.tag_id == body.tag_id,
+                    )
+                )).scalars().first()
+                if not exists:
+                    s.add(OperationReportTag(report_id=rid, tag_id=body.tag_id))
+                    affected.append(rid)
+            else:  # remove
+                res = await s.execute(
+                    delete(OperationReportTag).where(
+                        OperationReportTag.report_id == rid,
+                        OperationReportTag.tag_id == body.tag_id,
+                    )
+                )
+                if res.rowcount:
+                    affected.append(rid)
+        await s.commit()
+
+    asyncio.create_task(log_activity(
+        scope.user_id, scope.user.username or f"user:{scope.user_id}",
+        "clinic_report_update",
+        {"bulk_tag": body.tag_id, "mode": body.mode,
+         "affected": len(affected), "skipped": len(skipped)},
+    ))
+    return {"affected": affected, "skipped": skipped}
 
 
 async def _tags_for_reports(session, report_ids: list[int]) -> dict[int, list[dict]]:

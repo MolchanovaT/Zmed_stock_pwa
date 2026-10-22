@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import {
-  createReport, getReport, patchReport, deleteReport,
+  createReport, getReport, patchReport, deleteReport, copyReport,
   uploadReportFile, openReportFile, deleteReportFile,
   suggestDoctors, suggestOperationTypes, openReportPdf,
   getReportAudit, listTags, setReportTags,
@@ -669,10 +669,24 @@ export default function ClinicReportFormPage() {
         {!canEdit && (
           <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-4 text-sm flex items-center justify-between gap-3 flex-wrap">
             <span>Этот отчёт отправлен и больше не редактируется.</span>
-            <button onClick={() => openReportPdf(reportId)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
-              📄 Скачать PDF
-            </button>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={async () => {
+                  try {
+                    const created = await copyReport(reportId)
+                    navigate(`/clinic-reports/${created.id}`, { replace: false })
+                  } catch (e) {
+                    setError(e.response?.data?.detail || 'Ошибка копирования')
+                  }
+                }}
+                className="bg-white border border-emerald-500 text-emerald-700 hover:bg-emerald-50 rounded-lg px-4 py-2 text-sm font-medium">
+                📋 Копировать в черновик
+              </button>
+              <button onClick={() => openReportPdf(reportId)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
+                📄 Скачать PDF
+              </button>
+            </div>
           </div>
         )}
 
