@@ -298,6 +298,32 @@ class OperationReport(Base):
     submitted_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class ReportTag(Base):
+    """Справочник тегов для отчётов. Администрируется ZMed-staff.
+
+    Один тег виден всем клиникам. Клиника может помечать свои отчёты
+    любым тегом; ZMed — любой отчёт.
+    """
+    __tablename__ = "report_tags"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    color = Column(String(7), nullable=False, default="#9a2a3a")
+    description = Column(String, nullable=True)
+    active = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+
+
+class OperationReportTag(Base):
+    """Many-to-many: отчёты × теги."""
+    __tablename__ = "operation_report_tags"
+
+    report_id = Column(Integer, ForeignKey("operation_reports.id"),
+                       primary_key=True)
+    tag_id = Column(Integer, ForeignKey("report_tags.id"), primary_key=True)
+
+
 class OperationReportAudit(Base):
     """Аудит событий, важных для подписанного отчёта:
 

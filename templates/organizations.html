@@ -31,24 +31,26 @@
     <strong>ZMed</strong> видит данные всех клиник; <strong>клиника</strong> видит только свои.
 </p>
 
-<table class="table table-sm table-bordered" style="max-width: 1100px;">
+<h5>Активные ({{ active_items|length }})</h5>
+<table class="table table-sm table-bordered" style="max-width: 1200px;">
     <thead class="table-light">
     <tr>
-        <th style="width: 30%">Название</th>
-        <th style="width: 15%">Тип</th>
-        <th style="width: 15%">ИНН</th>
-        <th style="width: 10%">Активна</th>
-        <th style="width: 10%">Юзеров</th>
-        <th style="width: 20%"></th>
+        <th style="width: 28%">Название</th>
+        <th style="width: 13%">Тип</th>
+        <th style="width: 13%">ИНН</th>
+        <th style="width: 8%">Юзеров</th>
+        <th style="width: 8%">Отчётов</th>
+        <th style="width: 30%"></th>
     </tr>
     </thead>
     <tbody>
-    {% for org in organizations %}
+    {% for org in active_items %}
     <tr>
         <form action="{{ url_for('organization_edit', org_id=org.id) }}" method="post" class="m-0">
             <td>
                 <input class="form-control form-control-sm" type="text" name="name"
                        value="{{ org.name }}" required>
+                <input type="hidden" name="active" value="1">
             </td>
             <td>
                 <select class="form-select form-select-sm" name="kind">
@@ -60,33 +62,69 @@
                 <input class="form-control form-control-sm" type="text" name="inn"
                        value="{{ org.inn or '' }}" placeholder="7707XXXXXX">
             </td>
-            <td class="text-center">
-                <div class="form-check d-inline-block">
-                    <input class="form-check-input" type="checkbox" name="active"
-                           id="org_active_{{ org.id }}" {% if org.active %}checked{% endif %}>
-                    <label class="form-check-label" for="org_active_{{ org.id }}"></label>
-                </div>
-            </td>
-            <td class="text-center">
-                {{ user_counts.get(org.id, 0) }}
-            </td>
+            <td class="text-center">{{ user_counts.get(org.id, 0) }}</td>
+            <td class="text-center">{{ report_counts.get(org.id, 0) }}</td>
             <td class="text-end">
-                <button class="btn btn-primary btn-sm">Сохранить</button>
+                <button class="btn btn-primary btn-sm">💾</button>
         </form>
+                {% if org.kind != 'zmed' %}
+                <form action="{{ url_for('organization_archive', org_id=org.id) }}" method="post"
+                      class="d-inline ms-1"
+                      onsubmit="return confirm('Отправить клинику «{{ org.name }}» в архив? Её пользователи потеряют доступ к клиническим модулям, данные останутся для ZMed.');">
+                    <button class="btn btn-outline-warning btn-sm" title="Архивировать">📦</button>
+                </form>
+                {% endif %}
                 <form action="{{ url_for('organization_del', org_id=org.id) }}" method="post"
                       class="d-inline ms-1"
-                      onsubmit="return confirm('Удалить организацию «{{ org.name }}»?');">
-                    <button class="btn btn-outline-danger btn-sm">🗑</button>
+                      onsubmit="return confirm('Полностью удалить организацию «{{ org.name }}»? Это необратимо.');">
+                    <button class="btn btn-outline-danger btn-sm" title="Удалить">🗑</button>
                 </form>
             </td>
     </tr>
     {% else %}
     <tr>
-        <td colspan="6" class="text-muted"><em>Список пуст — добавьте хотя бы ZMed и несколько клиник.</em></td>
+        <td colspan="6" class="text-muted"><em>Активных нет — добавьте ZMed и/или клиники ниже.</em></td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
+
+{% if archived_items %}
+<h5 class="mt-4 text-muted">📦 Архив ({{ archived_items|length }})</h5>
+<p class="small text-muted">
+    Пользователи архивных клиник не могут работать с клиническими модулями.
+    Отчёты и движения сохранены — доступны администратору ZMed для аудита.
+</p>
+<table class="table table-sm table-bordered table-light" style="max-width: 1200px;">
+    <thead>
+    <tr>
+        <th>Название</th>
+        <th>ИНН</th>
+        <th class="text-center">Отчётов</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for org in archived_items %}
+    <tr>
+        <td class="text-muted">{{ org.name }}</td>
+        <td class="text-muted">{{ org.inn or '—' }}</td>
+        <td class="text-center text-muted">{{ report_counts.get(org.id, 0) }}</td>
+        <td class="text-end">
+            <form action="{{ url_for('organization_restore', org_id=org.id) }}" method="post" class="d-inline">
+                <button class="btn btn-outline-success btn-sm">Восстановить</button>
+            </form>
+            <form action="{{ url_for('organization_del', org_id=org.id) }}" method="post"
+                  class="d-inline ms-1"
+                  onsubmit="return confirm('Полностью удалить «{{ org.name }}»? Необратимо.');">
+                <button class="btn btn-outline-danger btn-sm">🗑</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
 
 <h5 class="mt-4">➕ Добавить организацию</h5>
 <form action="{{ url_for('organization_add') }}" method="post" class="row g-2 align-items-end" style="max-width: 1100px;">

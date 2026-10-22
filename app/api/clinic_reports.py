@@ -52,7 +52,7 @@ from app.api.scoping import (
 from app.api.tg_notify import send_report_tg_notification
 from app.db.models import (
     Organization, OperationReport, OperationReportAudit, OperationReportFile,
-    User,
+    OperationReportTag, ReportTag, User,
 )
 from app.db.session import AsyncSessionLocal
 
@@ -235,7 +235,8 @@ def _ensure_can_edit(report: OperationReport, scope: OrgScope) -> None:
         )
 
 
-def _serialize_report(report: OperationReport, files: list[OperationReportFile]) -> dict:
+def _serialize_report(report: OperationReport, files: list[OperationReportFile],
+                       tags: list[dict] | None = None) -> dict:
     return {
         "id": report.id,
         "organization_id": report.organization_id,
@@ -252,6 +253,7 @@ def _serialize_report(report: OperationReport, files: list[OperationReportFile])
         "status": report.status,
         "created_at": report.created_at.isoformat() if report.created_at else None,
         "submitted_at": report.submitted_at.isoformat() if report.submitted_at else None,
+        "tags": tags or [],
         "files": [
             {
                 "id": f.id,
@@ -307,6 +309,8 @@ async def list_reports(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
+    tag_id: Optional[int] = Query(None),
+    q: Optional[str] = Query(None, max_length=200),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     scope: OrgScope = Depends(require_org_scope),
@@ -315,7 +319,7 @@ async def list_reports(
 
     Возвращает:
       reports — страница результата;
-      total   — всего строк, подходящих под фильтры (для прогресса в UI);
+      total   — всего строк, подходящих под фильтры;
       limit, offset — эхо параметров.
     """
     from sqlalchemy import func as _f
@@ -331,6 +335,22 @@ async def list_reports(
             if status_filter not in ALLOWED_STATUSES:
                 raise HTTPException(status_code=400, detail=f"Неизвестный status: {status_filter}")
             stmt = stmt.where(OperationReport.status == status_filter)
+        if tag_id:
+            stmt = stmt.where(OperationReport.id.in_(
+                select(OperationReportTag.report_id)
+                .where(OperationReportTag.tag_id == tag_id)
+            ))
+        if q:
+            # FTS5 полнотекстовый поиск. Экранируем кавычки для MATCH.
+            query_text = q.replace('"', '').strip()
+            if query_text:
+                from sqlalchemy import text as _text
+                stmt = stmt.where(OperationReport.id.in_(
+                    _text(
+                        "SELECT rowid FROM operation_reports_fts "
+                        "WHERE operation_reports_fts MATCH :fts_q"
+                    ).bindparams(fts_q=f'"{query_text}"*')
+                ))
         return stmt
 
     async with AsyncSessionLocal() as s:
@@ -355,8 +375,14 @@ async def list_reports(
             for f in files_res.scalars().all():
                 files_by_report.setdefault(f.report_id, []).append(f)
 
+        tags_by_report = await _tags_for_reports(s, [r.id for r in reports])
+
     return {
-        "reports": [_serialize_report(r, files_by_report.get(r.id, [])) for r in reports],
+        "reports": [
+            _serialize_report(r, files_by_report.get(r.id, []),
+                              tags_by_report.get(r.id, []))
+            for r in reports
+        ],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -434,7 +460,8 @@ async def get_report(
             .order_by(OperationReportFile.id)
         )
         files = list(files_res.scalars().all())
-    return _serialize_report(report, files)
+        tags = (await _tags_for_reports(s, [report_id])).get(report_id, [])
+    return _serialize_report(report, files, tags)
 
 
 @router.patch("/{report_id}")
@@ -660,6 +687,80 @@ async def delete_file(
         await s.commit()
 
 
+# ── Теги ─────────────────────────────────────────────────────────────────────
+
+@router.get("/tags/list")
+async def list_tags(scope: OrgScope = Depends(require_org_scope)):
+    """Активные теги — общий справочник для всех клиник."""
+    async with AsyncSessionLocal() as s:
+        res = await s.execute(
+            select(ReportTag).where(ReportTag.active == 1).order_by(ReportTag.name)
+        )
+        tags = res.scalars().all()
+    return {"tags": [
+        {"id": t.id, "name": t.name, "color": t.color, "description": t.description}
+        for t in tags
+    ]}
+
+
+class TagSet(BaseModel):
+    tag_ids: list[int] = Field(default_factory=list)
+
+
+@router.put("/{report_id}/tags")
+async def set_tags(
+    report_id: int,
+    body: TagSet,
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """Переписать набор тегов отчёта. Доступ: любой, кто может редактировать отчёт."""
+    async with AsyncSessionLocal() as s:
+        report = await s.get(OperationReport, report_id)
+        _ensure_can_edit(report, scope)
+
+        # Валидируем, что все tag_ids существуют и активны
+        if body.tag_ids:
+            res = await s.execute(
+                select(ReportTag.id).where(
+                    ReportTag.id.in_(body.tag_ids),
+                    ReportTag.active == 1,
+                )
+            )
+            valid = {r[0] for r in res.all()}
+            invalid = set(body.tag_ids) - valid
+            if invalid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Неизвестные или архивные теги: {sorted(invalid)}",
+                )
+
+        # Удаляем старые
+        await s.execute(
+            delete(OperationReportTag).where(OperationReportTag.report_id == report_id)
+        )
+        # Добавляем новые
+        for tid in set(body.tag_ids):
+            s.add(OperationReportTag(report_id=report_id, tag_id=tid))
+        await s.commit()
+    return {"ok": True, "tag_ids": sorted(set(body.tag_ids))}
+
+
+async def _tags_for_reports(session, report_ids: list[int]) -> dict[int, list[dict]]:
+    """Для списка отчётов — массив тегов на каждый. Один запрос."""
+    if not report_ids:
+        return {}
+    res = await session.execute(
+        select(OperationReportTag.report_id, ReportTag.id,
+                ReportTag.name, ReportTag.color)
+        .join(ReportTag, ReportTag.id == OperationReportTag.tag_id)
+        .where(OperationReportTag.report_id.in_(report_ids))
+    )
+    out: dict[int, list[dict]] = {}
+    for rid, tid, name, color in res.all():
+        out.setdefault(rid, []).append({"id": tid, "name": name, "color": color})
+    return out
+
+
 # ── Audit log ───────────────────────────────────────────────────────────────
 
 @router.get("/{report_id}/audit")
@@ -717,12 +818,12 @@ except Exception:
     pass
 
 
-@router.get("/{report_id}.pdf")
-async def report_pdf(
-    report_id: int,
-    scope: OrgScope = Depends(require_org_scope),
-):
-    """PDF одного отчёта. Доступ — с теми же правилами, что GET /{id}."""
+def _render_report_pdf_bytes(report: OperationReport,
+                               org: Optional[Organization],
+                               files: list,
+                               implants: list) -> bytes:
+    """Общий код генерации PDF одного отчёта. Переиспользуется /{id}.pdf
+    и ZIP-архивом экспорта."""
     import io
     from datetime import datetime as _dt
     from reportlab.lib import colors as rl_colors
@@ -731,22 +832,6 @@ async def report_pdf(
     from reportlab.platypus import (
         Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
     )
-
-    async with AsyncSessionLocal() as s:
-        report = await s.get(OperationReport, report_id)
-        _ensure_access_to_report(report, scope)
-        org = await s.get(Organization, report.organization_id)
-        files_res = await s.execute(
-            select(OperationReportFile)
-            .where(OperationReportFile.report_id == report_id)
-            .order_by(OperationReportFile.id)
-        )
-        files = list(files_res.scalars().all())
-
-    try:
-        implants = json.loads(report.implants_used_json) if report.implants_used_json else []
-    except (ValueError, TypeError):
-        implants = []
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -766,7 +851,7 @@ async def report_pdf(
 
     status_label = {"draft": "Черновик", "submitted": "Отправлен"}
     story: list = [
-        Paragraph(f"Отчёт об операции #{report_id}", h1),
+        Paragraph(f"Отчёт об операции #{report.id}", h1),
         Paragraph(f"Статус: {status_label.get(report.status, report.status)}", normal),
         Spacer(1, 12),
     ]
@@ -852,11 +937,119 @@ async def report_pdf(
 
     doc.build(story)
     buf.seek(0)
+    return buf.getvalue()
+
+
+@router.get("/{report_id}.pdf")
+async def report_pdf(
+    report_id: int,
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """PDF одного отчёта. Доступ — с теми же правилами, что GET /{id}."""
+    import io
+    async with AsyncSessionLocal() as s:
+        report = await s.get(OperationReport, report_id)
+        _ensure_access_to_report(report, scope)
+        org = await s.get(Organization, report.organization_id)
+        files_res = await s.execute(
+            select(OperationReportFile)
+            .where(OperationReportFile.report_id == report_id)
+            .order_by(OperationReportFile.id)
+        )
+        files = list(files_res.scalars().all())
+
+    try:
+        implants = json.loads(report.implants_used_json) if report.implants_used_json else []
+    except (ValueError, TypeError):
+        implants = []
+
+    pdf_bytes = _render_report_pdf_bytes(report, org, files, implants)
     filename = f"report_{report_id}.pdf"
     return StreamingResponse(
-        buf,
+        io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+# ── ZIP-архив PDF-отчётов за период ─────────────────────────────────────────
+
+@router.get("/export-pdfs.zip")
+async def export_pdfs_zip(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query("submitted", alias="status"),
+    tag_id: Optional[int] = Query(None),
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """ZIP с PDF каждого отчёта. Макс 100 отчётов за раз, иначе 413."""
+    import io
+    import zipfile
+
+    date_from_v = _parse_iso_date(date_from)
+    date_to_v = _parse_iso_date(date_to)
+    if status_filter and status_filter not in ALLOWED_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status: {status_filter}")
+
+    async with AsyncSessionLocal() as s:
+        stmt = select(OperationReport, Organization).join(
+            Organization, Organization.id == OperationReport.organization_id
+        )
+        if scope.organization_id is not None:
+            stmt = stmt.where(OperationReport.organization_id == scope.organization_id)
+        if date_from_v:
+            stmt = stmt.where(OperationReport.operation_date >= date_from_v)
+        if date_to_v:
+            stmt = stmt.where(OperationReport.operation_date <= date_to_v)
+        if status_filter:
+            stmt = stmt.where(OperationReport.status == status_filter)
+        if tag_id:
+            stmt = stmt.where(OperationReport.id.in_(
+                select(OperationReportTag.report_id)
+                .where(OperationReportTag.tag_id == tag_id)
+            ))
+        stmt = stmt.order_by(OperationReport.operation_date.desc()).limit(101)
+
+        rows = (await s.execute(stmt)).all()
+        if len(rows) > 100:
+            raise HTTPException(
+                status_code=413,
+                detail="Слишком много отчётов (>100). Уточните период или теги.",
+            )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Нет отчётов по фильтрам.")
+
+        # Файлы (используем только счётчик — в PDF вставляются как цифра)
+        report_ids = [r.id for r, _ in rows]
+        files_res = await s.execute(
+            select(OperationReportFile).where(
+                OperationReportFile.report_id.in_(report_ids)
+            )
+        )
+        files_by_report: dict[int, list] = {}
+        for f in files_res.scalars().all():
+            files_by_report.setdefault(f.report_id, []).append(f)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for report, org in rows:
+            try:
+                implants = json.loads(report.implants_used_json) if report.implants_used_json else []
+            except (ValueError, TypeError):
+                implants = []
+            pdf = _render_report_pdf_bytes(
+                report, org, files_by_report.get(report.id, []), implants,
+            )
+            # Папка по дате для аккуратной структуры в архиве
+            yr = (report.operation_date or "unknown")[:4]
+            zf.writestr(f"{yr}/report_{report.id}_{report.operation_date}.pdf", pdf)
+
+    buf.seek(0)
+    filename = f"reports_{date_from_v or 'all'}_{date_to_v or 'all'}.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

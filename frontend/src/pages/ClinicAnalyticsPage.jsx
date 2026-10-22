@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../store/auth'
 import {
   getByClinic, getMonthly, getTopOperationTypes,
+  getByDoctor, getByDepartment,
 } from '../api/clinic_analytics'
 
 // Палитра — brand-neutral, без завязок на конкретную тему
@@ -20,6 +21,8 @@ export default function ClinicAnalyticsPage() {
   const [monthly, setMonthly] = useState([])
   const [byClinic, setByClinic] = useState([])
   const [topTypes, setTopTypes] = useState([])
+  const [byDoctor, setByDoctor] = useState([])
+  const [byDepartment, setByDepartment] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -28,8 +31,14 @@ export default function ClinicAnalyticsPage() {
       getMonthly(12),
       getByClinic(),
       getTopOperationTypes({ limit: 8 }),
+      getByDoctor({ limit: 10 }),
+      getByDepartment({ limit: 10 }),
     ])
-      .then(([m, c, t]) => { setMonthly(m); setByClinic(c); setTopTypes(t); setError('') })
+      .then(([m, c, t, d, dep]) => {
+        setMonthly(m); setByClinic(c); setTopTypes(t)
+        setByDoctor(d); setByDepartment(dep)
+        setError('')
+      })
       .catch((e) => setError(e.response?.data?.detail || 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }, [])
@@ -107,6 +116,44 @@ export default function ClinicAnalyticsPage() {
                     <Bar dataKey="reports"  name="Отчёты"       fill="#9a2a3a"/>
                     <Bar dataKey="implants_total" name="Импланты" fill="#2c5f8a"/>
                     <Bar dataKey="losses_qty" name="Потери (шт)" fill="#c89b4a"/>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+
+            {/* Топ врачей */}
+            <Card title="Топ врачей (по числу отчётов)">
+              {byDoctor.length === 0 ? (
+                <p className="text-gray-400 text-sm">Нет данных</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.max(240, byDoctor.length * 32)}>
+                  <BarChart layout="vertical" data={byDoctor} margin={{ left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
+                    <XAxis type="number" fontSize={12}/>
+                    <YAxis type="category" dataKey="name" width={200} fontSize={12}/>
+                    <Tooltip/>
+                    <Legend/>
+                    <Bar dataKey="count" name="Отчёты" fill="#4b8c6b"/>
+                    <Bar dataKey="implants" name="Имплантов" fill="#2c5f8a"/>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+
+            {/* По отделениям */}
+            <Card title="По отделениям">
+              {byDepartment.length === 0 ? (
+                <p className="text-gray-400 text-sm">Нет данных (поле «отделение» не заполнено ни в одном отчёте)</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.max(220, byDepartment.length * 32)}>
+                  <BarChart layout="vertical" data={byDepartment} margin={{ left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
+                    <XAxis type="number" fontSize={12}/>
+                    <YAxis type="category" dataKey="name" width={200} fontSize={12}/>
+                    <Tooltip/>
+                    <Legend/>
+                    <Bar dataKey="count" name="Отчёты" fill="#c89b4a"/>
+                    <Bar dataKey="implants" name="Имплантов" fill="#2c5f8a"/>
                   </BarChart>
                 </ResponsiveContainer>
               )}

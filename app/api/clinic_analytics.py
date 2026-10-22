@@ -227,3 +227,62 @@ async def top_operation_types(
             stmt = stmt.where(OperationReport.operation_date <= date_to)
         rows = (await s.execute(stmt)).all()
     return {"items": [{"operation_type": t, "count": c} for t, c in rows]}
+
+
+async def _grouped_report_stats(scope: OrgScope, group_field,
+                                  date_from: Optional[str],
+                                  date_to: Optional[str], limit: int) -> list[dict]:
+    """Общая логика группировки отчётов по произвольному полю (врач / отделение).
+
+    Для каждой группы считаем:
+      count     — число submitted-отчётов;
+      implants  — сумма qty имплантов (из JSON — агрегируем в Python).
+    """
+    async with AsyncSessionLocal() as s:
+        stmt = (select(group_field, OperationReport.implants_used_json)
+                 .where(OperationReport.status == "submitted"))
+        if scope.organization_id is not None:
+            stmt = stmt.where(OperationReport.organization_id == scope.organization_id)
+        if date_from:
+            stmt = stmt.where(OperationReport.operation_date >= date_from)
+        if date_to:
+            stmt = stmt.where(OperationReport.operation_date <= date_to)
+        rows = (await s.execute(stmt)).all()
+
+    agg: dict[str, dict] = {}
+    for key, implants_json in rows:
+        if not key:
+            continue  # пропускаем пустые группы (department может быть None)
+        a = agg.setdefault(key, {"name": key, "count": 0, "implants": 0})
+        a["count"] += 1
+        a["implants"] += _implants_count(implants_json)
+    items = sorted(agg.values(), key=lambda x: -x["count"])[:limit]
+    return items
+
+
+@router.get("/by-doctor")
+async def by_doctor(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    scope: OrgScope = Depends(require_org_scope),
+):
+    items = await _grouped_report_stats(
+        scope, OperationReport.doctor_name,
+        _parse_iso_date(date_from), _parse_iso_date(date_to), limit,
+    )
+    return {"items": items}
+
+
+@router.get("/by-department")
+async def by_department(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    scope: OrgScope = Depends(require_org_scope),
+):
+    items = await _grouped_report_stats(
+        scope, OperationReport.department,
+        _parse_iso_date(date_from), _parse_iso_date(date_to), limit,
+    )
+    return {"items": items}

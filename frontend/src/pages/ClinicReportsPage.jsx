@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
-import { listReports, downloadReportsXlsx } from '../api/clinic_reports'
+import {
+  listReports, downloadReportsXlsx, downloadReportsPdfZip, listTags,
+} from '../api/clinic_reports'
 
 const STATUS_LABEL = {
   draft: { text: 'Черновик', cls: 'bg-amber-100 text-amber-800' },
@@ -16,6 +18,9 @@ export default function ClinicReportsPage() {
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState('')
+  const [filterTagId, setFilterTagId] = useState('')
+  const [availableTags, setAvailableTags] = useState([])
+  const [searchQ, setSearchQ] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [error, setError] = useState('')
@@ -26,6 +31,8 @@ export default function ClinicReportsPage() {
     const nextOffset = append ? offset + PAGE_SIZE : 0
     const params = { limit: PAGE_SIZE, offset: nextOffset }
     if (filterStatus) params.status = filterStatus
+    if (filterTagId) params.tag_id = filterTagId
+    if (searchQ.trim()) params.q = searchQ.trim()
     if (dateFrom) params.date_from = dateFrom
     if (dateTo) params.date_to = dateTo
     listReports(params)
@@ -39,7 +46,11 @@ export default function ClinicReportsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh(false) /* eslint-disable-line */ }, [])
+  useEffect(() => {
+    refresh(false)
+    listTags().then(setAvailableTags).catch(() => {})
+    /* eslint-disable-next-line */
+  }, [])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -69,6 +80,7 @@ export default function ClinicReportsPage() {
               onClick={() => {
                 const params = {}
                 if (filterStatus) params.status = filterStatus
+                if (filterTagId) params.tag_id = filterTagId
                 if (dateFrom) params.date_from = dateFrom
                 if (dateTo) params.date_to = dateTo
                 downloadReportsXlsx(params)
@@ -76,6 +88,20 @@ export default function ClinicReportsPage() {
               className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm font-medium"
             >
               📥 XLSX
+            </button>
+            <button
+              onClick={() => {
+                const params = {}
+                if (filterTagId) params.tag_id = filterTagId
+                if (dateFrom) params.date_from = dateFrom
+                if (dateTo) params.date_to = dateTo
+                // Статус: всегда submitted для архива PDF
+                downloadReportsPdfZip(params)
+              }}
+              title="ZIP с PDF каждого отправленного отчёта (до 100 за раз)"
+              className="bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-4 py-2 text-sm font-medium"
+            >
+              📦 PDF ZIP
             </button>
             <Link to="/clinic-reports/new"
                   className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
@@ -85,6 +111,14 @@ export default function ClinicReportsPage() {
         </div>
 
         <div className="bg-white rounded-xl border p-3 flex flex-wrap gap-3 items-end mb-4">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs text-gray-500 mb-1">Поиск</label>
+            <input value={searchQ}
+                   onChange={(e) => setSearchQ(e.target.value)}
+                   onKeyDown={(e) => e.key === 'Enter' && refresh(false)}
+                   placeholder="По коду, врачу, диагнозу, заметке"
+                   className="w-full border rounded px-2 py-1 text-sm"/>
+          </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Статус</label>
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
@@ -94,6 +128,18 @@ export default function ClinicReportsPage() {
               <option value="submitted">Отправлен</option>
             </select>
           </div>
+          {availableTags.length > 0 && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Тег</label>
+              <select value={filterTagId} onChange={(e) => setFilterTagId(e.target.value)}
+                      className="border rounded px-2 py-1 text-sm">
+                <option value="">все</option>
+                {availableTags.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1">С</label>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
@@ -140,6 +186,17 @@ export default function ClinicReportsPage() {
                     <span>🔩 {implants.length} поз.</span>
                     {r.files?.length > 0 && <span>📎 {r.files.length} файл(ов)</span>}
                   </div>
+                  {r.tags?.length > 0 && (
+                    <div className="flex gap-1 flex-wrap mt-2">
+                      {r.tags.map((t) => (
+                        <span key={t.id}
+                              style={{ background: t.color, color: '#fff' }}
+                              className="text-xs px-2 py-0.5 rounded-full font-medium">
+                          {t.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </Link>
               )
             })}

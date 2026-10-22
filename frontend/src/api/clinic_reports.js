@@ -55,6 +55,15 @@ export const deleteReportFile = (reportId, fileId) =>
 export const getReportAudit = (reportId) =>
   client.get(`/clinic-reports/${reportId}/audit`).then((r) => r.data.entries)
 
+/** Активные теги (общий справочник). */
+export const listTags = () =>
+  client.get('/clinic-reports/tags/list').then((r) => r.data.tags)
+
+/** Переписать набор тегов отчёта. */
+export const setReportTags = (reportId, tagIds) =>
+  client.put(`/clinic-reports/${reportId}/tags`, { tag_ids: tagIds })
+    .then((r) => r.data)
+
 export const suggestDoctors = (q = '') =>
   client.get('/clinic-reports/suggest/doctors', { params: { q } })
     .then((r) => r.data.items)
@@ -70,6 +79,21 @@ export const openReportPdf = async (reportId) => {
   })
   const url = URL.createObjectURL(resp.data)
   window.open(url, '_blank', 'noopener')
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+/** Скачать ZIP с PDF каждого отчёта за период. Максимум 100 отчётов. */
+export const downloadReportsPdfZip = async (params = {}) => {
+  const resp = await client.get('/clinic-reports/export-pdfs.zip', {
+    params, responseType: 'blob', timeout: 180000,
+  })
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `clinic_reports_${new Date().toISOString().slice(0, 10)}.zip`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 

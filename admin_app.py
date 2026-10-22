@@ -20,6 +20,7 @@ from flask import abort
 from app.db.models import (
     User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient,
     Organization, OperationReport, OperationReportAudit, OperationReportFile,
+    ReportTag,
 )
 from flask import send_file, abort as flask_abort
 from app.db.models_stats import TgUser, Interaction  # noqa: F401  -- регистрируем модели в Base.metadata
@@ -623,6 +624,15 @@ def organizations():
         .filter(User.organization_id.isnot(None))
         .group_by(User.organization_id).all()
     )
+    # Количество отчётов по клиникам (для «архив» помним аудит)
+    report_counts = dict(
+        db_session.query(OperationReport.organization_id,
+                          func.count(OperationReport.id))
+        .group_by(OperationReport.organization_id).all()
+    )
+
+    active_items  = [o for o in items if o.active]
+    archived_items = [o for o in items if not o.active]
 
     # Неимпортированные ЛПУ — по ИНН и по названию
     existing_inns  = {o.inn for o in items if o.inn}
@@ -635,7 +645,10 @@ def organizations():
 
     return render_template("organizations.html",
                            organizations=items,
+                           active_items=active_items,
+                           archived_items=archived_items,
                            user_counts=user_counts,
+                           report_counts=report_counts,
                            unimported_lpus=unimported_lpus)
 
 
@@ -728,6 +741,41 @@ def organization_edit(org_id: int):
     return redirect(url_for("organizations"))
 
 
+@app.post("/organizations/archive/<int:org_id>")
+@login_required
+def organization_archive(org_id: int):
+    """Архивация клиники (soft-delete).
+
+    Активные юзеры этой клиники потеряют доступ к клиническим модулям
+    на уровне require_org_scope (там проверка org.active). ZMed-admin
+    по-прежнему видит её данные для аудита.
+    """
+    org = db_session.get(Organization, org_id)
+    if not org:
+        flash("Организация не найдена.", "error")
+        return redirect(url_for("organizations"))
+    if org.kind == "zmed":
+        flash("ZMed-организацию нельзя архивировать.", "error")
+        return redirect(url_for("organizations"))
+    org.active = 0
+    db_session.commit()
+    flash(f"📦 Клиника «{org.name}» переведена в архив.", "success")
+    return redirect(url_for("organizations"))
+
+
+@app.post("/organizations/restore/<int:org_id>")
+@login_required
+def organization_restore(org_id: int):
+    org = db_session.get(Organization, org_id)
+    if not org:
+        flash("Организация не найдена.", "error")
+        return redirect(url_for("organizations"))
+    org.active = 1
+    db_session.commit()
+    flash(f"✅ Клиника «{org.name}» восстановлена.", "success")
+    return redirect(url_for("organizations"))
+
+
 @app.post("/organizations/del/<int:org_id>")
 @login_required
 def organization_del(org_id: int):
@@ -745,6 +793,82 @@ def organization_del(org_id: int):
     db_session.commit()
     flash(f"🗑 Организация «{name}» удалена.", "success")
     return redirect(url_for("organizations"))
+
+
+# ─────────────────────────────
+# Теги отчётов (справочник ZMed)
+
+@app.route("/report-tags", methods=["GET"])
+@login_required
+def report_tags():
+    items = db_session.query(ReportTag).order_by(
+        ReportTag.active.desc(), ReportTag.name
+    ).all()
+    return render_template("report_tags.html", tags=items)
+
+
+@app.post("/report-tags/add")
+@login_required
+def report_tag_add():
+    name = (request.form.get("name") or "").strip()
+    color = (request.form.get("color") or "#9a2a3a").strip()
+    descr = (request.form.get("description") or "").strip() or None
+    if not name:
+        flash("Укажите название тега.", "error")
+        return redirect(url_for("report_tags"))
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        flash("Цвет должен быть в формате #RRGGBB.", "error")
+        return redirect(url_for("report_tags"))
+    if db_session.query(ReportTag).filter_by(name=name).first():
+        flash(f"Тег «{name}» уже есть.", "warning")
+        return redirect(url_for("report_tags"))
+    db_session.add(ReportTag(name=name, color=color, description=descr, active=1))
+    db_session.commit()
+    flash(f"✅ Тег «{name}» добавлен.", "success")
+    return redirect(url_for("report_tags"))
+
+
+@app.post("/report-tags/edit/<int:tag_id>")
+@login_required
+def report_tag_edit(tag_id: int):
+    t = db_session.get(ReportTag, tag_id)
+    if not t:
+        flash("Тег не найден.", "error")
+        return redirect(url_for("report_tags"))
+    name = (request.form.get("name") or "").strip()
+    color = (request.form.get("color") or "#9a2a3a").strip()
+    descr = (request.form.get("description") or "").strip() or None
+    active = 1 if request.form.get("active") else 0
+    if not name:
+        flash("Укажите название тега.", "error")
+        return redirect(url_for("report_tags"))
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        flash("Цвет должен быть в формате #RRGGBB.", "error")
+        return redirect(url_for("report_tags"))
+    if name != t.name and db_session.query(ReportTag).filter_by(name=name).first():
+        flash(f"«{name}» уже занято.", "warning")
+        return redirect(url_for("report_tags"))
+    t.name = name
+    t.color = color
+    t.description = descr
+    t.active = active
+    db_session.commit()
+    flash("✅ Сохранено.", "success")
+    return redirect(url_for("report_tags"))
+
+
+@app.post("/report-tags/del/<int:tag_id>")
+@login_required
+def report_tag_del(tag_id: int):
+    t = db_session.get(ReportTag, tag_id)
+    if not t:
+        flash("Тег не найден.", "error")
+        return redirect(url_for("report_tags"))
+    name = t.name
+    db_session.delete(t)
+    db_session.commit()
+    flash(f"🗑 Тег «{name}» удалён.", "success")
+    return redirect(url_for("report_tags"))
 
 
 # ─────────────────────────────

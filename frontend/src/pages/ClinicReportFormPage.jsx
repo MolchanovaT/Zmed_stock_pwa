@@ -5,7 +5,7 @@ import {
   createReport, getReport, patchReport, deleteReport,
   uploadReportFile, openReportFile, deleteReportFile,
   suggestDoctors, suggestOperationTypes, openReportPdf,
-  getReportAudit,
+  getReportAudit, listTags, setReportTags,
 } from '../api/clinic_reports'
 import { requestOtp } from '../api/otp'
 
@@ -53,6 +53,8 @@ export default function ClinicReportFormPage() {
   const fileInputRef = useRef(null)
   const [step, setStep] = useState(0)   // 0..4; используется только при canEdit
   const [audit, setAudit] = useState([])
+  const [availableTags, setAvailableTags] = useState([])
+  const [reportTagIds, setReportTagIds] = useState([])
   // OTP-режим: если сервер отдал 400/401 с подсказкой — показываем модалку
   const [otp, setOtp] = useState(null)   // {purpose, sentTo, code, pending}
 
@@ -98,6 +100,7 @@ export default function ClinicReportFormPage() {
         })
         setFiles(r.files || [])
         setReportId(r.id)
+        setReportTagIds((r.tags || []).map((t) => t.id))
       })
       .catch((e) => setError(e.response?.data?.detail || 'Отчёт не найден'))
       .finally(() => setLoading(false))
@@ -106,7 +109,23 @@ export default function ClinicReportFormPage() {
   useEffect(() => {
     suggestDoctors('').then(setDoctorSuggests).catch(() => {})
     suggestOperationTypes('').then(setOpTypeSuggests).catch(() => {})
+    listTags().then(setAvailableTags).catch(() => {})
   }, [])
+
+  const toggleTag = async (tagId) => {
+    if (!reportId) return  // Пока нет id — сохранять некуда (сначала сохрани черновик)
+    const next = reportTagIds.includes(tagId)
+      ? reportTagIds.filter((x) => x !== tagId)
+      : [...reportTagIds, tagId]
+    setReportTagIds(next)
+    try {
+      await setReportTags(reportId, next)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Ошибка тегов')
+      // Откатываем визуал
+      setReportTagIds((prev) => reportTagIds)
+    }
+  }
 
   // Audit log: подтягиваем, только если отчёт существует и уже отправлен.
   useEffect(() => {
@@ -510,7 +529,35 @@ export default function ClinicReportFormPage() {
         </section>
         )}
 
-        {/* Шаг 5: осложнения и заметки + файлы (в одной секции для компактности) */}
+        {/* Шаг 5: теги + осложнения и заметки + файлы */}
+        {(!canEdit || step === 4) && availableTags.length > 0 && (
+        <section className="bg-white rounded-xl border p-5 space-y-3">
+          <h2 className="font-semibold text-gray-800">5a. Теги</h2>
+          {!reportId && (
+            <p className="text-xs text-amber-700">
+              Чтобы назначить теги — сначала сохраните черновик.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {availableTags.map((t) => {
+              const active = reportTagIds.includes(t.id)
+              return (
+                <button key={t.id}
+                        onClick={() => toggleTag(t.id)}
+                        disabled={!canEdit || !reportId}
+                        type="button"
+                        style={active
+                          ? { background: t.color, color: '#fff', borderColor: t.color }
+                          : { color: t.color, borderColor: t.color }}
+                        className="px-3 py-1 text-xs font-medium rounded-full border transition disabled:opacity-50">
+                  {active && '✓ '}{t.name}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+        )}
+
         {(!canEdit || step === 4) && (
         <section className="bg-white rounded-xl border p-5 space-y-4">
           <h2 className="font-semibold text-gray-800">5. Осложнения и заметки</h2>

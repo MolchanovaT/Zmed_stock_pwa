@@ -11,3 +11,11 @@ export const getByClinic = (params = {}) =>
 export const getTopOperationTypes = (params = {}) =>
   client.get('/clinic-analytics/top-operation-types', { params })
     .then((r) => r.data.items)
+
+export const getByDoctor = (params = {}) =>
+  client.get('/clinic-analytics/by-doctor', { params })
+    .then((r) => r.data.items)
+
+export const getByDepartment = (params = {}) =>
+  client.get('/clinic-analytics/by-department', { params })
+    .then((r) => r.data.items)
