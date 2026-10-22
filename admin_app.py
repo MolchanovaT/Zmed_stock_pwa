@@ -19,7 +19,7 @@ from flask import abort
 
 from app.db.models import (
     User, PwaActivity, InnDiler, InnLpu, InnPending, EmailRecipient,
-    Organization, OperationReport, OperationReportFile,
+    Organization, OperationReport, OperationReportAudit, OperationReportFile,
 )
 from flask import send_file, abort as flask_abort
 from app.db.models_stats import TgUser, Interaction  # noqa: F401  -- регистрируем модели в Base.metadata
@@ -868,6 +868,12 @@ def admin_clinic_report_detail(report_id: int):
     org = db_session.get(Organization, r.organization_id)
     user = db_session.get(User, r.user_id)
     files = db_session.query(OperationReportFile).filter_by(report_id=report_id).all()
+    audit_entries = db_session.query(OperationReportAudit).filter_by(
+        report_id=report_id
+    ).order_by(OperationReportAudit.id.desc()).all()
+    audit_users = {u.id: u for u in db_session.query(User).filter(
+        User.id.in_({a.user_id for a in audit_entries} or {0})
+    ).all()}
 
     implants = []
     if r.implants_used_json:
@@ -879,6 +885,7 @@ def admin_clinic_report_detail(report_id: int):
     return render_template(
         "admin_clinic_report_detail.html",
         r=r, org=org, user=user, files=files, implants=implants,
+        audit=audit_entries, audit_users=audit_users,
     )
 
 
@@ -892,7 +899,18 @@ def admin_clinic_report_file(report_id: int, file_id: int):
     data_dir = os.getenv("REPORTS_DIR") or os.path.join(
         os.path.dirname(__file__), "data", "reports"
     )
-    disk_path = Path(data_dir).resolve() / rec.stored_path
+    base = Path(data_dir).resolve()
+
+    # Защита от path-traversal в stored_path
+    p = Path(rec.stored_path)
+    if p.is_absolute() or ".." in p.parts:
+        flask_abort(400)
+    disk_path = (base / p).resolve()
+    try:
+        disk_path.relative_to(base)
+    except ValueError:
+        flask_abort(400)
+
     if not disk_path.exists():
         flask_abort(410)
     return send_file(

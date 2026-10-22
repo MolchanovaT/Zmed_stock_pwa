@@ -4,8 +4,15 @@ import { useAuth } from '../store/auth'
 import {
   createReport, getReport, patchReport, deleteReport,
   uploadReportFile, openReportFile, deleteReportFile,
-  suggestDoctors, suggestOperationTypes,
+  suggestDoctors, suggestOperationTypes, openReportPdf,
+  getReportAudit,
 } from '../api/clinic_reports'
+
+const AUDIT_LABEL = {
+  submit: { text: 'Отправлен', cls: 'bg-emerald-100 text-emerald-800' },
+  edit_after_submit: { text: 'Правка после отправки', cls: 'bg-amber-100 text-amber-800' },
+  delete_submitted: { text: 'Удалён', cls: 'bg-red-100 text-red-800' },
+}
 
 const emptyImplant = () => ({ article: '', nomenclature: '', qty: 1, lot_number: '', serial: '' })
 
@@ -43,8 +50,31 @@ export default function ClinicReportFormPage() {
   const [opTypeSuggests, setOpTypeSuggests] = useState([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef(null)
+  const [step, setStep] = useState(0)   // 0..4; используется только при canEdit
+  const [audit, setAudit] = useState([])
 
   const canEdit = isNew || (form.status === 'draft')
+
+  // Шаги и их валидация. Опциональные — валидация пустая.
+  const STEPS = [
+    { label: 'Операция', hint: 'Код операции, дата, отделение' },
+    { label: 'Врач и тип', hint: 'ФИО врача и тип операции' },
+    { label: 'Диагноз',  hint: 'Код МКБ-10 или краткая формулировка' },
+    { label: 'Импланты', hint: 'Что использовали в операции' },
+    { label: 'Файлы и заметки', hint: 'Фото/скан протокола, осложнения' },
+  ]
+
+  const validateStep = (idx) => {
+    if (idx === 0) {
+      if (!form.patient_code.trim()) return 'Укажите код операции'
+      if (!form.operation_date) return 'Укажите дату операции'
+    }
+    if (idx === 1) {
+      if (!form.doctor_name.trim()) return 'Укажите ФИО врача'
+      if (!form.operation_type.trim()) return 'Укажите тип операции'
+    }
+    return null
+  }
 
   // Загрузка существующего отчёта
   useEffect(() => {
@@ -74,6 +104,12 @@ export default function ClinicReportFormPage() {
     suggestDoctors('').then(setDoctorSuggests).catch(() => {})
     suggestOperationTypes('').then(setOpTypeSuggests).catch(() => {})
   }, [])
+
+  // Audit log: подтягиваем, только если отчёт существует и уже отправлен.
+  useEffect(() => {
+    if (isNew || !reportId || form.status === 'draft') { setAudit([]); return }
+    getReportAudit(reportId).then(setAudit).catch(() => setAudit([]))
+  }, [isNew, reportId, form.status])
 
   const upd = (field, value) => setForm((f) => ({ ...f, [field]: value }))
 
@@ -250,7 +286,38 @@ export default function ClinicReportFormPage() {
           <div className="bg-red-50 text-red-700 rounded p-3 text-sm">{error}</div>
         )}
 
-        {/* Секция 1: об операции */}
+        {/* Прогресс-бар. Только в режиме редактирования. */}
+        {canEdit && (
+          <div className="bg-white rounded-xl border p-4">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <div className="font-semibold text-gray-800">
+                Шаг {step + 1} из {STEPS.length}: {STEPS[step].label}
+              </div>
+              <div className="flex gap-1">
+                {STEPS.map((_, i) => (
+                  <button key={i}
+                          onClick={() => {
+                            // Назад — свободно; вперёд — только если предыдущие валидны
+                            if (i <= step) { setStep(i); setError(''); return }
+                            for (let k = step; k < i; k++) {
+                              const err = validateStep(k)
+                              if (err) { setError(err); return }
+                            }
+                            setStep(i); setError('')
+                          }}
+                          className={`w-7 h-2 rounded-full transition
+                            ${i === step ? 'bg-brand-600'
+                              : i < step ? 'bg-brand-300' : 'bg-gray-200'}`}
+                          aria-label={`Перейти к шагу ${i + 1}`}/>
+                ))}
+              </div>
+            </div>
+            <div className="text-xs text-gray-500">{STEPS[step].hint}</div>
+          </div>
+        )}
+
+        {/* Шаг 1: Операция (patient_code, date, department) */}
+        {(!canEdit || step === 0) && (
         <section className="bg-white rounded-xl border p-5 space-y-4">
           <h2 className="font-semibold text-gray-800">1. Об операции</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -276,7 +343,7 @@ export default function ClinicReportFormPage() {
                      onChange={(e) => upd('operation_date', e.target.value)}
                      className="w-full border rounded px-3 py-2 text-sm"/>
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-xs text-gray-500 mb-1">Отделение</label>
               <input value={form.department} disabled={!canEdit}
                      maxLength={100}
@@ -284,6 +351,15 @@ export default function ClinicReportFormPage() {
                      placeholder="нейрохирургия"
                      className="w-full border rounded px-3 py-2 text-sm"/>
             </div>
+          </div>
+        </section>
+        )}
+
+        {/* Шаг 2: Врач и тип операции */}
+        {(!canEdit || step === 1) && (
+        <section className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-800">2. Врач и тип операции</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs text-gray-500 mb-1">ФИО врача *</label>
               <input value={form.doctor_name} disabled={!canEdit}
@@ -294,7 +370,7 @@ export default function ClinicReportFormPage() {
                 {doctorSuggests.map((d) => <option key={d} value={d}/>)}
               </datalist>
             </div>
-            <div className="sm:col-span-2">
+            <div>
               <label className="block text-xs text-gray-500 mb-1">Тип операции *</label>
               <input value={form.operation_type} disabled={!canEdit}
                      maxLength={200} list="op-type-suggests"
@@ -307,10 +383,12 @@ export default function ClinicReportFormPage() {
             </div>
           </div>
         </section>
+        )}
 
-        {/* Секция 2: диагноз */}
+        {/* Шаг 3: диагноз */}
+        {(!canEdit || step === 2) && (
         <section className="bg-white rounded-xl border p-5 space-y-3">
-          <h2 className="font-semibold text-gray-800">2. Диагноз</h2>
+          <h2 className="font-semibold text-gray-800">3. Диагноз</h2>
           <textarea value={form.diagnosis_text} disabled={!canEdit}
                     maxLength={500} rows={3}
                     onChange={(e) => upd('diagnosis_text', e.target.value)}
@@ -320,11 +398,13 @@ export default function ClinicReportFormPage() {
             Код МКБ-10 или краткая формулировка. Без ПДн пациента и анамнеза. До 500 символов.
           </p>
         </section>
+        )}
 
-        {/* Секция 3: импланты */}
+        {/* Шаг 4: импланты */}
+        {(!canEdit || step === 3) && (
         <section className="bg-white rounded-xl border p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-800">3. Использованные импланты</h2>
+            <h2 className="font-semibold text-gray-800">4. Использованные импланты</h2>
             {canEdit && (
               <button onClick={addImplantRow}
                       className="text-brand-600 hover:text-brand-700 text-sm font-medium">
@@ -384,10 +464,12 @@ export default function ClinicReportFormPage() {
             </table>
           </div>
         </section>
+        )}
 
-        {/* Секция 4: осложнения и заметки */}
+        {/* Шаг 5: осложнения и заметки + файлы (в одной секции для компактности) */}
+        {(!canEdit || step === 4) && (
         <section className="bg-white rounded-xl border p-5 space-y-4">
-          <h2 className="font-semibold text-gray-800">4. Осложнения и заметки</h2>
+          <h2 className="font-semibold text-gray-800">5. Осложнения и заметки</h2>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Осложнения</label>
             <textarea value={form.complications} disabled={!canEdit}
@@ -403,11 +485,13 @@ export default function ClinicReportFormPage() {
                       className="w-full border rounded px-3 py-2 text-sm"/>
           </div>
         </section>
+        )}
 
-        {/* Секция 5: файлы */}
+        {/* Шаг 5 (вторая часть): файлы */}
+        {(!canEdit || step === 4) && (
         <section className="bg-white rounded-xl border p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-800">5. Фото и сканы</h2>
+            <h2 className="font-semibold text-gray-800">6. Фото и сканы</h2>
             {canEdit && (
               <>
                 <input ref={fileInputRef} type="file" multiple hidden
@@ -449,31 +533,91 @@ export default function ClinicReportFormPage() {
             </ul>
           )}
         </section>
+        )}
 
-        {/* Кнопки */}
+        {/* Нижняя панель навигации wizard'а */}
         {canEdit && (
           <div className="flex gap-3 flex-wrap">
+            {step > 0 && (
+              <button onClick={() => { setStep(step - 1); setError('') }}
+                      className="bg-white border rounded-lg px-5 py-2 text-gray-700 hover:bg-gray-50">
+                ← Назад
+              </button>
+            )}
             <button onClick={saveDraft} disabled={saving}
                     className="bg-white border border-brand-500 text-brand-600 hover:bg-brand-50 rounded-lg px-5 py-2 font-medium disabled:opacity-50">
-              💾 Сохранить черновик
+              💾 Черновик
             </button>
-            <button onClick={submit} disabled={saving}
-                    className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-5 py-2 font-medium disabled:opacity-50">
-              ✅ Отправить
-            </button>
+            {step < STEPS.length - 1 && (
+              <button
+                onClick={() => {
+                  const err = validateStep(step)
+                  if (err) { setError(err); return }
+                  setStep(step + 1); setError('')
+                }}
+                className="ml-auto bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-5 py-2 font-medium"
+              >
+                Далее →
+              </button>
+            )}
+            {step === STEPS.length - 1 && (
+              <button onClick={submit} disabled={saving}
+                      className="ml-auto bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-5 py-2 font-medium disabled:opacity-50">
+                ✅ Отправить
+              </button>
+            )}
             {!isNew && (
               <button onClick={removeDraft} disabled={saving}
-                      className="ml-auto text-red-500 hover:text-red-600 text-sm">
-                🗑 Удалить черновик
+                      className="text-red-500 hover:text-red-600 text-sm self-center">
+                🗑 Удалить
               </button>
             )}
           </div>
         )}
 
         {!canEdit && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-4 text-sm">
-            Этот отчёт отправлен и больше не редактируется.
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-4 text-sm flex items-center justify-between gap-3 flex-wrap">
+            <span>Этот отчёт отправлен и больше не редактируется.</span>
+            <button onClick={() => openReportPdf(reportId)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm font-medium">
+              📄 Скачать PDF
+            </button>
           </div>
+        )}
+
+        {!isNew && canEdit && (
+          <div className="text-xs text-gray-400">
+            Отчёт черновик — PDF будет доступен после отправки.
+          </div>
+        )}
+
+        {audit.length > 0 && (
+          <section className="bg-white rounded-xl border p-5">
+            <h2 className="font-semibold text-gray-800 mb-3">История подписания</h2>
+            <ul className="space-y-2">
+              {audit.map((e) => {
+                const meta = AUDIT_LABEL[e.action] || { text: e.action, cls: 'bg-gray-100 text-gray-700' }
+                return (
+                  <li key={e.id} className="flex items-start gap-3 text-sm">
+                    <span className={`${meta.cls} text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap`}>
+                      {meta.text}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-gray-700">
+                        {e.user_name || `user#${e.user_id}`}
+                        <span className="text-xs text-gray-400 ml-2">
+                          {e.created_at ? new Date(e.created_at).toLocaleString() : ''}
+                        </span>
+                      </div>
+                      {e.note && (
+                        <div className="text-xs text-gray-500 mt-0.5">{e.note}</div>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
         )}
       </main>
     </div>

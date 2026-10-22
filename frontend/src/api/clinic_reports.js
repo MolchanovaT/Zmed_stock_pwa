@@ -52,6 +52,9 @@ export const openReportFile = async (reportId, fileId, filename) => {
 export const deleteReportFile = (reportId, fileId) =>
   client.delete(`/clinic-reports/${reportId}/files/${fileId}`)
 
+export const getReportAudit = (reportId) =>
+  client.get(`/clinic-reports/${reportId}/audit`).then((r) => r.data.entries)
+
 export const suggestDoctors = (q = '') =>
   client.get('/clinic-reports/suggest/doctors', { params: { q } })
     .then((r) => r.data.items)
@@ -59,6 +62,16 @@ export const suggestDoctors = (q = '') =>
 export const suggestOperationTypes = (q = '') =>
   client.get('/clinic-reports/suggest/operation-types', { params: { q } })
     .then((r) => r.data.items)
+
+/** Открыть PDF отчёта в новой вкладке (blob'ом с JWT). */
+export const openReportPdf = async (reportId) => {
+  const resp = await client.get(`/clinic-reports/${reportId}.pdf`, {
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(resp.data)
+  window.open(url, '_blank', 'noopener')
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
 
 /** Скачать XLSX с отчётами (blob'ом, с JWT). */
 export const downloadReportsXlsx = async (params = {}) => {

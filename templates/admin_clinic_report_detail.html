@@ -70,6 +70,32 @@
     </div>
 
     <div class="col-md-4">
+        <h4>🧾 История подписания</h4>
+        {% if audit %}
+        <ul class="list-group mb-3">
+            {% for a in audit %}
+            <li class="list-group-item small">
+                {% set label = {'submit': ('Отправлен', 'success'),
+                                 'edit_after_submit': ('Правка после отправки', 'warning'),
+                                 'delete_submitted': ('Удалён', 'danger')}.get(a.action, (a.action, 'secondary')) %}
+                <span class="badge bg-{{ label[1] }} me-1">{{ label[0] }}</span>
+                <strong>
+                    {% if a.user_id in audit_users %}
+                        {{ audit_users[a.user_id].username or audit_users[a.user_id].full_name }}
+                    {% else %}user#{{ a.user_id }}{% endif %}
+                </strong>
+                <br>
+                <span class="text-muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else '' }}</span>
+                {% if a.note %}
+                <div class="text-muted mt-1">{{ a.note }}</div>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted small"><em>Записей аудита нет (черновик не отправлен).</em></p>
+        {% endif %}
+
         <h4>📎 Файлы</h4>
         {% if files %}
         <ul class="list-group">

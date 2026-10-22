@@ -277,6 +277,32 @@ class OperationReport(Base):
     submitted_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class OperationReportAudit(Base):
+    """Аудит событий, важных для подписанного отчёта:
+
+    action:
+      'submit'            — отправка (draft → submitted)
+      'edit_after_submit' — правка ZMed после submit
+      'delete_submitted'  — удаление submitted отчёта (только ZMed)
+
+    snapshot_json — полный снимок полей OperationReport на момент действия.
+    note — пояснение (для edit_after_submit — обязательно).
+    """
+    __tablename__ = "operation_report_audit"
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("operation_reports.id"),
+                       nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"),
+                             nullable=False, index=True)
+    action = Column(String(32), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    snapshot_json = Column(Text, nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+
+
 class OperationReportFile(Base):
     """Прикреплённый к отчёту файл: фото бумажного протокола / скан / фото UDI.
 

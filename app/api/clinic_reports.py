@@ -48,7 +48,10 @@ from app.api.scoping import (
     OrgScope, require_org_scope, resolve_target_org_id,
 )
 from app.api.tg_notify import send_report_tg_notification
-from app.db.models import Organization, OperationReport, OperationReportFile, User
+from app.db.models import (
+    Organization, OperationReport, OperationReportAudit, OperationReportFile,
+    User,
+)
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/clinic-reports", tags=["clinic_reports"])
@@ -123,6 +126,39 @@ def _parse_iso_date(s: str) -> str:
             detail=f"operation_date должна быть в формате YYYY-MM-DD, получено: {s!r}",
         )
     return s
+
+
+def _snapshot(report: OperationReport) -> dict:
+    """Снимок OperationReport для audit log."""
+    return {
+        "id": report.id,
+        "organization_id": report.organization_id,
+        "user_id": report.user_id,
+        "patient_code": report.patient_code,
+        "operation_date": report.operation_date,
+        "department": report.department,
+        "doctor_name": report.doctor_name,
+        "operation_type": report.operation_type,
+        "diagnosis_text": report.diagnosis_text,
+        "implants_used_json": report.implants_used_json,
+        "complications": report.complications,
+        "notes": report.notes,
+        "status": report.status,
+        "created_at": report.created_at.isoformat() if report.created_at else None,
+        "submitted_at": report.submitted_at.isoformat() if report.submitted_at else None,
+    }
+
+
+async def _audit(session, report: OperationReport, scope: OrgScope,
+                  action: str, note: Optional[str] = None) -> None:
+    session.add(OperationReportAudit(
+        report_id=report.id,
+        organization_id=report.organization_id,
+        action=action,
+        user_id=scope.user_id,
+        snapshot_json=json.dumps(_snapshot(report), ensure_ascii=False),
+        note=note,
+    ))
 
 
 async def _notify_submitted(report: OperationReport, scope: OrgScope,
@@ -236,6 +272,26 @@ def _storage_path_for(report_id: int, orig_name: str) -> tuple[Path, str]:
     return disk_path, rel_path
 
 
+def _safe_disk_path(stored_path: str) -> Path:
+    """Защита от path-traversal: отдаём абсолютный путь ТОЛЬКО если он лежит
+    внутри _DATA_DIR. Любой `..` или абсолютный путь в БД → 400.
+
+    Параноично: защита от компрометации stored_path (напр. через SQL
+    injection или ошибку в миграции).
+    """
+    base = _DATA_DIR.resolve()
+    # Запрещаем абсолютные пути сразу
+    p = Path(stored_path)
+    if p.is_absolute() or ".." in p.parts:
+        raise HTTPException(status_code=400, detail="Некорректный путь файла")
+    full = (base / p).resolve()
+    try:
+        full.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректный путь файла")
+    return full
+
+
 # ── Эндпоинты ────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -333,6 +389,9 @@ async def create_report(
         s.add(report)
         await s.commit()
         await s.refresh(report)
+        if report.status == "submitted":
+            await _audit(s, report, scope, "submit")
+            await s.commit()
 
     asyncio.create_task(log_activity(
         scope.user_id, scope.user.username or f"user:{scope.user_id}",
@@ -393,6 +452,7 @@ async def patch_report(
                 [i.model_dump() for i in body.implants_used], ensure_ascii=False
             ) if body.implants_used else None
 
+        was_submitted_before = (report.status == "submitted")
         just_submitted = False
         if body.status is not None:
             if body.status not in ALLOWED_STATUSES:
@@ -405,6 +465,15 @@ async def patch_report(
         s.add(report)
         await s.commit()
         await s.refresh(report)
+
+        # Audit: submit — всегда; edit submitted — если ZMed правил уже отправленный
+        if just_submitted:
+            await _audit(s, report, scope, "submit")
+            await s.commit()
+        elif was_submitted_before and scope.is_zmed:
+            await _audit(s, report, scope, "edit_after_submit",
+                          note=(body.notes or body.complications or None))
+            await s.commit()
 
         files_res = await s.execute(
             select(OperationReportFile)
@@ -436,13 +505,20 @@ async def delete_report(
                                    or report.status != "draft"):
             raise HTTPException(status_code=403, detail="Нельзя удалить этот отчёт")
 
-        # Снести файлы на диске
+        # Audit: удаление submitted отчёта (только ZMed такое может по правилам
+        # _ensure_can_edit, но проверим снова для надёжности).
+        if report.status == "submitted":
+            await _audit(s, report, scope, "delete_submitted")
+            await s.flush()
+
+        # Снести файлы на диске (с защитой от path-traversal в stored_path)
         files_res = await s.execute(
             select(OperationReportFile).where(OperationReportFile.report_id == report_id)
         )
         for f in files_res.scalars().all():
             try:
-                (_DATA_DIR / f.stored_path).unlink(missing_ok=True)
+                safe = _safe_disk_path(f.stored_path)
+                safe.unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -529,7 +605,7 @@ async def download_file(
         if rec is None or rec.report_id != report_id:
             raise HTTPException(status_code=404, detail="Файл не найден")
 
-    disk_path = _DATA_DIR / rec.stored_path
+    disk_path = _safe_disk_path(rec.stored_path)
     if not disk_path.exists():
         raise HTTPException(status_code=410, detail="Файл утрачен на диске")
 
@@ -554,12 +630,213 @@ async def delete_file(
             raise HTTPException(status_code=404, detail="Файл не найден")
 
         try:
-            (_DATA_DIR / rec.stored_path).unlink(missing_ok=True)
+            safe = _safe_disk_path(rec.stored_path)
+            safe.unlink(missing_ok=True)
         except Exception:
             pass
 
         await s.delete(rec)
         await s.commit()
+
+
+# ── Audit log ───────────────────────────────────────────────────────────────
+
+@router.get("/{report_id}/audit")
+async def get_audit(
+    report_id: int,
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """История действий над отчётом (submit / edit_after_submit / delete).
+
+    Виден и клинике (свои отчёты), и ZMed (все).
+    """
+    async with AsyncSessionLocal() as s:
+        report = await s.get(OperationReport, report_id)
+        _ensure_access_to_report(report, scope)
+        res = await s.execute(
+            select(OperationReportAudit)
+            .where(OperationReportAudit.report_id == report_id)
+            .order_by(OperationReportAudit.id.desc())
+        )
+        entries = list(res.scalars().all())
+        # Подтянем username'ы
+        user_ids = {e.user_id for e in entries}
+        users_map = {}
+        if user_ids:
+            u_res = await s.execute(select(User).where(User.id.in_(user_ids)))
+            users_map = {u.id: u for u in u_res.scalars().all()}
+    out = []
+    for e in entries:
+        u = users_map.get(e.user_id)
+        out.append({
+            "id": e.id,
+            "action": e.action,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "user_id": e.user_id,
+            "user_name": (u.username if u else None) or (u.full_name if u else None),
+            "note": e.note,
+            # snapshot возвращаем парсеным — удобнее на фронте
+            "snapshot": (
+                json.loads(e.snapshot_json) if e.snapshot_json else None
+            ),
+        })
+    return {"entries": out}
+
+
+# ── PDF-экспорт одного отчёта ───────────────────────────────────────────────
+
+# Регистрируем шрифты один раз при импорте модуля (как в stock.py)
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
+try:
+    from reportlab.pdfbase import pdfmetrics as _pdfm
+    from reportlab.pdfbase.ttfonts import TTFont as _TTFont
+    _pdfm.registerFont(_TTFont("DejaVuSans", os.path.join(_FONT_DIR, "DejaVuSans.ttf")))
+    _pdfm.registerFont(_TTFont("DejaVuSans-Bold", os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf")))
+except Exception:
+    pass
+
+
+@router.get("/{report_id}.pdf")
+async def report_pdf(
+    report_id: int,
+    scope: OrgScope = Depends(require_org_scope),
+):
+    """PDF одного отчёта. Доступ — с теми же правилами, что GET /{id}."""
+    import io
+    from datetime import datetime as _dt
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.platypus import (
+        Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
+    async with AsyncSessionLocal() as s:
+        report = await s.get(OperationReport, report_id)
+        _ensure_access_to_report(report, scope)
+        org = await s.get(Organization, report.organization_id)
+        files_res = await s.execute(
+            select(OperationReportFile)
+            .where(OperationReportFile.report_id == report_id)
+            .order_by(OperationReportFile.id)
+        )
+        files = list(files_res.scalars().all())
+
+    try:
+        implants = json.loads(report.implants_used_json) if report.implants_used_json else []
+    except (ValueError, TypeError):
+        implants = []
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                             leftMargin=36, rightMargin=36,
+                             topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    normal = ParagraphStyle(name="N", parent=styles["Normal"],
+                             fontName="DejaVuSans", fontSize=10, leading=14)
+    bold = ParagraphStyle(name="B", parent=styles["Normal"],
+                           fontName="DejaVuSans-Bold", fontSize=13, leading=16)
+    h1 = ParagraphStyle(name="H1", parent=styles["Normal"],
+                         fontName="DejaVuSans-Bold", fontSize=16, leading=20,
+                         textColor=rl_colors.HexColor("#9a2a3a"))
+    small = ParagraphStyle(name="S", parent=styles["Normal"],
+                            fontName="DejaVuSans", fontSize=8, leading=11,
+                            textColor=rl_colors.grey)
+
+    status_label = {"draft": "Черновик", "submitted": "Отправлен"}
+    story: list = [
+        Paragraph(f"Отчёт об операции #{report_id}", h1),
+        Paragraph(f"Статус: {status_label.get(report.status, report.status)}", normal),
+        Spacer(1, 12),
+    ]
+
+    # Таблица «реквизиты»
+    rows = [
+        ["Клиника", org.name if org else f"org#{report.organization_id}"],
+        ["Код операции", report.patient_code],
+        ["Дата операции", report.operation_date],
+        ["Отделение", report.department or "—"],
+        ["Врач", report.doctor_name],
+        ["Тип операции", report.operation_type],
+    ]
+    if report.diagnosis_text:
+        rows.append(["Диагноз", report.diagnosis_text])
+    if report.complications:
+        rows.append(["Осложнения", report.complications])
+    if report.notes:
+        rows.append(["Заметки", report.notes])
+    rows.append(["Создан",
+                  report.created_at.strftime("%Y-%m-%d %H:%M")
+                  if report.created_at else "—"])
+    if report.submitted_at:
+        rows.append(["Отправлен", report.submitted_at.strftime("%Y-%m-%d %H:%M")])
+    rows.append(["Файлов прикреплено", str(len(files))])
+
+    meta_table = Table(
+        [[Paragraph(k, bold), Paragraph(str(v), normal)] for k, v in rows],
+        colWidths=[130, 380],
+    )
+    meta_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, rl_colors.lightgrey),
+    ]))
+    story += [meta_table, Spacer(1, 18)]
+
+    # Таблица имплантов
+    if implants:
+        story.append(Paragraph("Использованные импланты", bold))
+        story.append(Spacer(1, 6))
+        imp_header = ["№", "Артикул", "Номенклатура", "Кол-во", "Lot", "Серийник"]
+        imp_rows = [imp_header]
+        for i, imp in enumerate(implants, 1):
+            imp_rows.append([
+                str(i),
+                imp.get("article", ""),
+                Paragraph(imp.get("nomenclature", ""), normal),
+                str(imp.get("qty", 1)),
+                imp.get("lot_number", ""),
+                imp.get("serial", ""),
+            ])
+        imp_table = Table(imp_rows, colWidths=[22, 70, 190, 40, 70, 90])
+        imp_table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
+            ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#9a2a3a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("ALIGN", (0, 1), (0, -1), "CENTER"),
+            ("ALIGN", (3, 1), (3, -1), "CENTER"),
+            ("GRID", (0, 0), (-1, -1), 0.3, rl_colors.lightgrey),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(imp_table)
+    else:
+        story.append(Paragraph("<i>Импланты не указаны</i>", normal))
+
+    story += [
+        Spacer(1, 24),
+        Paragraph(
+            "Этот документ сгенерирован системой ZMed Stock PWA. "
+            "ПДн пациента в документе не содержатся (152-ФЗ): используется "
+            "обезличенный код операции.",
+            small,
+        ),
+        Paragraph(f"Сгенерирован: {_dt.now().strftime('%Y-%m-%d %H:%M')}", small),
+    ]
+
+    doc.build(story)
+    buf.seek(0)
+    filename = f"report_{report_id}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # ── XLSX-экспорт ────────────────────────────────────────────────────────────
