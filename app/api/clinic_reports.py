@@ -43,6 +43,7 @@ from sqlalchemy import delete, select
 from app.api.activity import log_activity
 from app.api.auth import get_current_user
 from app.api.email_report import send_report_notification
+from app.api.rate_limit import upload_rate_limit
 from app.api.scoping import (
     OrgScope, require_org_scope, resolve_target_org_id,
 )
@@ -242,16 +243,20 @@ async def list_reports(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
-    limit: int = Query(200, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     scope: OrgScope = Depends(require_org_scope),
 ):
-    """Список отчётов с фильтрами и RLS."""
-    async with AsyncSessionLocal() as s:
-        stmt = select(OperationReport).order_by(
-            OperationReport.operation_date.desc(),
-            OperationReport.id.desc(),
-        ).limit(limit)
+    """Список отчётов с фильтрами, RLS и пагинацией.
 
+    Возвращает:
+      reports — страница результата;
+      total   — всего строк, подходящих под фильтры (для прогресса в UI);
+      limit, offset — эхо параметров.
+    """
+    from sqlalchemy import func as _f
+
+    def _apply_filters(stmt):
         if scope.organization_id is not None:
             stmt = stmt.where(OperationReport.organization_id == scope.organization_id)
         if date_from:
@@ -262,6 +267,16 @@ async def list_reports(
             if status_filter not in ALLOWED_STATUSES:
                 raise HTTPException(status_code=400, detail=f"Неизвестный status: {status_filter}")
             stmt = stmt.where(OperationReport.status == status_filter)
+        return stmt
+
+    async with AsyncSessionLocal() as s:
+        count_stmt = _apply_filters(select(_f.count(OperationReport.id)))
+        total = (await s.execute(count_stmt)).scalar_one()
+
+        stmt = _apply_filters(select(OperationReport)).order_by(
+            OperationReport.operation_date.desc(),
+            OperationReport.id.desc(),
+        ).limit(limit).offset(offset)
 
         reports = list((await s.execute(stmt)).scalars().all())
 
@@ -276,7 +291,12 @@ async def list_reports(
             for f in files_res.scalars().all():
                 files_by_report.setdefault(f.report_id, []).append(f)
 
-    return {"reports": [_serialize_report(r, files_by_report.get(r.id, [])) for r in reports]}
+    return {
+        "reports": [_serialize_report(r, files_by_report.get(r.id, [])) for r in reports],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -440,6 +460,7 @@ async def upload_file(
     report_id: int,
     file: UploadFile = File(...),
     scope: OrgScope = Depends(require_org_scope),
+    _rl: None = Depends(upload_rate_limit),
 ):
     """Загрузка одного файла (multipart). До 10 файлов на отчёт, 20 МБ каждый."""
     if file.content_type not in ALLOWED_CONTENT_TYPES:

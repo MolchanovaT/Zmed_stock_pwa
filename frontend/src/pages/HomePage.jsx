@@ -203,7 +203,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!hasReports) return
     listReports({ limit: 5 })
-      .then((data) => setReports(Array.isArray(data) ? data : []))
+      .then((data) => setReports(data?.reports || []))
       .catch(() => {})
   }, [hasReports])
 

@@ -1,0 +1,12 @@
+Alembic-ревизии для ZMed Stock PWA.
+
+Полный гид — docs/MIGRATIONS.md.
+
+Быстрый старт на существующей БД (прод/локаль):
+    alembic stamp 0001
+
+Создать новую ревизию по изменениям в моделях:
+    alembic revision --autogenerate -m "описание"
+
+Применить:
+    alembic upgrade head

@@ -12,25 +12,34 @@ export default function ClinicReportsPage() {
   const { user, signout } = useAuth()
   const navigate = useNavigate()
   const [reports, setReports] = useState([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [error, setError] = useState('')
+  const PAGE_SIZE = 50
 
-  const refresh = () => {
+  const refresh = (append = false) => {
     setLoading(true)
-    const params = {}
+    const nextOffset = append ? offset + PAGE_SIZE : 0
+    const params = { limit: PAGE_SIZE, offset: nextOffset }
     if (filterStatus) params.status = filterStatus
     if (dateFrom) params.date_from = dateFrom
     if (dateTo) params.date_to = dateTo
     listReports(params)
-      .then((r) => { setReports(r); setError('') })
+      .then((r) => {
+        setReports((prev) => append ? [...prev, ...(r.reports || [])] : (r.reports || []))
+        setTotal(r.total || 0)
+        setOffset(nextOffset)
+        setError('')
+      })
       .catch((e) => setError(e.response?.data?.detail || 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => { refresh(false) /* eslint-disable-line */ }, [])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -91,7 +100,7 @@ export default function ClinicReportsPage() {
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                    className="border rounded px-2 py-1 text-sm"/>
           </div>
-          <button onClick={refresh}
+          <button onClick={() => refresh(false)}
                   className="bg-gray-800 text-white rounded px-3 py-1 text-sm">Применить</button>
         </div>
 
@@ -130,6 +139,20 @@ export default function ClinicReportsPage() {
                 </Link>
               )
             })}
+          </div>
+        )}
+
+        {!loading && reports.length > 0 && (
+          <div className="mt-4 flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs text-gray-400">
+              показано {reports.length} из {total}
+            </span>
+            {reports.length < total && (
+              <button onClick={() => refresh(true)} disabled={loading}
+                      className="bg-white border border-brand-500 text-brand-600 hover:bg-brand-50 rounded-lg px-5 py-2 text-sm font-medium disabled:opacity-50">
+                Загрузить ещё ({total - reports.length})
+              </button>
+            )}
           </div>
         )}
       </main>

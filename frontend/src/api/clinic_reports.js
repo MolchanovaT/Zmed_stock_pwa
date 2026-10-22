@@ -5,8 +5,9 @@ import client from './client'
  * ПДн пациента НЕ передаются — только patient_code (обезличенный идентификатор).
  */
 
+/** Список отчётов с пагинацией. Возвращает {reports, total, limit, offset}. */
 export const listReports = (params = {}) =>
-  client.get('/clinic-reports', { params }).then((r) => r.data.reports)
+  client.get('/clinic-reports', { params }).then((r) => r.data)
 
 export const getReport = (id) =>
   client.get(`/clinic-reports/${id}`).then((r) => r.data)

@@ -10,9 +10,9 @@ export const createLocation = (body) =>
 export const patchLocation = (id, body) =>
   client.patch(`/clinic-stock/locations/${id}`, body).then((r) => r.data)
 
-/* Товар */
+/* Товар — пагинируем: {items, total, limit, offset} */
 export const listItems = (params = {}) =>
-  client.get('/clinic-stock/items', { params }).then((r) => r.data.items)
+  client.get('/clinic-stock/items', { params }).then((r) => r.data)
 
 export const getItem = (id) =>
   client.get(`/clinic-stock/items/${id}`).then((r) => r.data)

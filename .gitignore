@@ -10,6 +10,8 @@ __pycache__/
 
 # Данные и база
 data/
+# migrations/ — унаследованная папка (legacy); текущие ревизии живут в alembic/,
+# которая коммитится в репо.
 migrations/
 uploads/
 

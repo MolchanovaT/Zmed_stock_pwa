@@ -45,6 +45,7 @@ from sqlalchemy import and_, delete, func, select
 from fastapi.responses import StreamingResponse
 
 from app.api.activity import log_activity
+from app.api.rate_limit import scan_rate_limit
 from app.api.scoping import OrgScope, require_org_scope, resolve_target_org_id
 from app.db.models import (
     ClinicStockBalance, ClinicStockItem, ClinicStockLocation,
@@ -343,13 +344,18 @@ async def patch_location(loc_id: int, body: LocationPatch,
 async def list_items(
     q: Optional[str] = Query(None, max_length=200),
     only_in_stock: bool = Query(False),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     scope: OrgScope = Depends(require_org_scope),
 ):
-    """Список партий с суммарным остатком по локациям."""
-    async with AsyncSessionLocal() as s:
-        stmt = select(ClinicStockItem).order_by(
-            ClinicStockItem.article, ClinicStockItem.id.desc()
-        )
+    """Список партий с остатками по локациям + пагинация.
+
+    Внимание: only_in_stock фильтрует УЖЕ после агрегации балансов, то есть
+    total/pagination в этом режиме учитывают только партии с общим остатком >0.
+    """
+    from sqlalchemy import func as _f
+
+    def _apply_filters(stmt):
         if scope.organization_id is not None:
             stmt = stmt.where(ClinicStockItem.organization_id == scope.organization_id)
         if q:
@@ -360,12 +366,36 @@ async def list_items(
                 (ClinicStockItem.barcode.ilike(pattern)) |
                 (ClinicStockItem.lot_number.ilike(pattern))
             )
-        items = list((await s.execute(stmt)).scalars().all())
-        balances = await _get_item_balances(s, [i.id for i in items])
-    out = [_ser_item(i, balances.get(i.id, [])) for i in items]
-    if only_in_stock:
-        out = [i for i in out if i["total_balance"] > 0]
-    return {"items": out}
+        return stmt
+
+    async with AsyncSessionLocal() as s:
+        if only_in_stock:
+            # Нужны только партии с положительным общим остатком — считаем через
+            # внутренний JOIN по balances с SUM. Для простоты MVP берём все
+            # ids, затем фильтруем в Python — объёмы небольшие.
+            items_stmt = _apply_filters(select(ClinicStockItem)).order_by(
+                ClinicStockItem.article, ClinicStockItem.id.desc()
+            )
+            all_items = list((await s.execute(items_stmt)).scalars().all())
+            all_balances = await _get_item_balances(s, [i.id for i in all_items])
+            serialized_all = [
+                _ser_item(i, all_balances.get(i.id, []))
+                for i in all_items
+            ]
+            filtered = [x for x in serialized_all if x["total_balance"] > 0]
+            total = len(filtered)
+            out = filtered[offset:offset + limit]
+        else:
+            count_stmt = _apply_filters(select(_f.count(ClinicStockItem.id)))
+            total = (await s.execute(count_stmt)).scalar_one()
+            page_stmt = _apply_filters(select(ClinicStockItem)).order_by(
+                ClinicStockItem.article, ClinicStockItem.id.desc()
+            ).limit(limit).offset(offset)
+            page_items = list((await s.execute(page_stmt)).scalars().all())
+            balances = await _get_item_balances(s, [i.id for i in page_items])
+            out = [_ser_item(i, balances.get(i.id, [])) for i in page_items]
+
+    return {"items": out, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/items/{item_id}")
@@ -386,6 +416,7 @@ async def get_item(item_id: int, scope: OrgScope = Depends(require_org_scope)):
 async def scan_barcode(
     barcode: str = Query(..., min_length=1, max_length=200),
     scope: OrgScope = Depends(require_org_scope),
+    _rl: None = Depends(scan_rate_limit),
 ):
     """Поиск партии по штрихкоду. При множественном совпадении — возвращает все."""
     async with AsyncSessionLocal() as s:

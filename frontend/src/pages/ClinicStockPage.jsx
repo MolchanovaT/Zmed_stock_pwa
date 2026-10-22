@@ -89,14 +89,23 @@ export default function ClinicStockPage() {
   const [modal, setModal] = useState(null)  // {kind: 'receive'|..., item?}
   const [newLocation, setNewLocation] = useState({ name: '', kind: 'warehouse' })
 
-  const refresh = async () => {
+  const [itemsTotal, setItemsTotal] = useState(0)
+  const [itemsOffset, setItemsOffset] = useState(0)
+  const PAGE_SIZE = 100
+
+  const refresh = async (append = false) => {
     setLoading(true)
+    const nextOffset = append ? itemsOffset + PAGE_SIZE : 0
     try {
-      const [its, locs] = await Promise.all([
-        listItems({ q: search || undefined }),
+      const [itemsResp, locs] = await Promise.all([
+        listItems({ q: search || undefined, limit: PAGE_SIZE, offset: nextOffset }),
         listLocations(),
       ])
-      setItems(its); setLocations(locs); setError('')
+      setItems((prev) => append ? [...prev, ...itemsResp.items] : itemsResp.items)
+      setItemsTotal(itemsResp.total || 0)
+      setItemsOffset(nextOffset)
+      setLocations(locs)
+      setError('')
       if (tab === 'movements') {
         const mv = await listMovements({ limit: 500 })
         setMovements(mv)
@@ -270,11 +279,18 @@ export default function ClinicStockPage() {
                     })}
                   </tbody>
                 </table>
-                <div className="text-xs text-gray-400 p-2 border-t">
-                  ⇄ переместить · ✓ расход на операцию · ↶ возврат · 📋 инвентаризация · 🗑 списание
+                <div className="text-xs text-gray-400 p-2 border-t flex items-center justify-between gap-2 flex-wrap">
+                  <span>⇄ переместить · ✓ расход на операцию · ↶ возврат · 📋 инвентаризация · 🗑 списание</span>
+                  <span>показано {items.length} из {itemsTotal}</span>
                 </div>
               </div>
              )}
+            {items.length > 0 && items.length < itemsTotal && (
+              <button onClick={() => refresh(true)} disabled={loading}
+                      className="mx-auto block mt-3 bg-white border border-amber-500 text-amber-700 hover:bg-amber-50 rounded-lg px-5 py-2 text-sm font-medium disabled:opacity-50">
+                {loading ? 'Загрузка…' : `Загрузить ещё (${itemsTotal - items.length})`}
+              </button>
+            )}
           </>
         )}
 
@@ -560,7 +576,9 @@ function ConsumeModal({ item, locations, onClose, onDone }) {
   const [reports, setReports] = useState([])
 
   useEffect(() => {
-    listReports({ status: 'submitted', limit: 50 }).then(setReports).catch(() => {})
+    listReports({ status: 'submitted', limit: 50 })
+      .then((data) => setReports(data?.reports || []))
+      .catch(() => {})
   }, [])
 
   const submit = async () => {
