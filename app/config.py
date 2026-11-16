@@ -86,6 +86,11 @@ SMTP_FROM: str = os.getenv("SMTP_FROM", "")
 # на отчёты и т.п. Если не задан — ссылка в tg-сообщении не ставится.
 PWA_BASE_URL: str = os.getenv("PWA_BASE_URL", "").rstrip("/")
 
+# JWT — используется и в app.api.auth (выдача токенов), и в app.api.otp
+# (соль для хеша OTP-кода). Держим здесь, чтобы оба модуля брали из одного места.
+JWT_SECRET: str = os.getenv("JWT_SECRET", "CHANGE_ME_32_char_secret_key_!!!!")
+JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+
 # Email-OTP подпись при отправке отчёта об операции.
 # По умолчанию выключен — соответствует текущему поведению (сразу submit).
 # Включите, когда юридически потребуется двухфакторное подтверждение подписи.

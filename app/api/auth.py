@@ -12,7 +12,6 @@ Telegram-вход в бота — по tg_id, контролируется со�
 """
 
 import asyncio
-import os
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -23,13 +22,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.api.activity import log_activity
+from app.config import JWT_ALGORITHM, JWT_SECRET
 from app.db.models import User
 from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-JWT_SECRET: str = os.getenv("JWT_SECRET", "CHANGE_ME_32_char_secret_key_!!!!")
-JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_HOURS: int = 8
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
